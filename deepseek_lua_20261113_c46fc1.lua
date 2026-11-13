@@ -2,10 +2,17 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+
+local function getHui()
+    if gethui then
+        local ok, hui = pcall(gethui)
+        if ok and hui then return hui end
+    end
+    return game:GetService("CoreGui")
+end
 
 local Config = {
     ESP = false,
@@ -32,8 +39,10 @@ local noclipSaved = {}
 local function notify(text)
     local gui = Instance.new("ScreenGui")
     gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
     gui.DisplayOrder = 999
-    gui.Parent = CoreGui
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    gui.Parent = getHui()
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(0, 240, 0, 40)
     frame.Position = UDim2.new(0.5, -120, 0, -56)
@@ -65,20 +74,24 @@ end
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "ollie_menu"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.DisplayOrder = 500
-ScreenGui.Parent = CoreGui
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.DisplayOrder = 600
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+ScreenGui.Parent = getHui()
 
 local Circle = Instance.new("TextButton")
 Circle.Name = "Circle"
-Circle.Size = UDim2.new(0, 56, 0, 56)
-Circle.Position = UDim2.new(0.03, 0, 0.5, -28)
+Circle.Size = UDim2.new(0, 60, 0, 60)
+Circle.Position = UDim2.new(0, 16, 0.5, -30)
 Circle.BackgroundColor3 = Color3.fromRGB(30, 20, 40)
 Circle.Text = "o"
 Circle.TextColor3 = Color3.fromRGB(255, 90, 255)
 Circle.Font = Enum.Font.GothamBold
-Circle.TextSize = 28
+Circle.TextSize = 30
 Circle.BorderSizePixel = 0
 Circle.Active = true
+Circle.Selectable = false
+Circle.AutoButtonColor = false
 Circle.ZIndex = 20
 Circle.Parent = ScreenGui
 local cc = Instance.new("UICorner", Circle)
@@ -116,6 +129,7 @@ local hc = Instance.new("UICorner", Header)
 hc.CornerRadius = UDim.new(0, 12)
 
 local HeaderTitle = Instance.new("TextLabel")
+HeaderTitle.Name = "HeaderTitle"
 HeaderTitle.Size = UDim2.new(1, -56, 1, 0)
 HeaderTitle.Position = UDim2.new(0, 14, 0, 0)
 HeaderTitle.BackgroundTransparency = 1
@@ -136,6 +150,8 @@ Minimize.Text = "−"
 Minimize.TextColor3 = Color3.fromRGB(255, 90, 255)
 Minimize.Font = Enum.Font.GothamBold
 Minimize.TextSize = 24
+Minimize.AutoButtonColor = false
+Minimize.Active = true
 Minimize.ZIndex = 18
 Minimize.Parent = Header
 
@@ -168,6 +184,7 @@ for i, name in ipairs(tabNames) do
     btn.Font = Enum.Font.GothamMedium
     btn.TextSize = 13
     btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
     btn.ZIndex = 17
     btn.Parent = TabBar
     tabButtons[i] = btn
@@ -206,15 +223,30 @@ for i, btn in ipairs(tabButtons) do
     end)
 end
 
-local function makeTapOrDrag(obj, onClick, dragTarget)
-    local startPos
-    local startObjPos
-    local moved = false
-    obj.InputBegan:Connect(function(input)
+local function openMenu()
+    Circle.Visible = false
+    Main.Visible = true
+end
+
+local function closeMenu()
+    Main.Visible = false
+    Circle.Visible = true
+end
+
+Circle.MouseButton1Down:Connect(openMenu)
+Circle.MouseButton1Click:Connect(openMenu)
+Circle.Activated:Connect(openMenu)
+
+Minimize.MouseButton1Down:Connect(closeMenu)
+Minimize.MouseButton1Click:Connect(closeMenu)
+
+local function makeDrag(handle, target)
+    local startPos, startObjPos, moved
+    handle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
             startPos = input.Position
-            startObjPos = dragTarget.Position
+            startObjPos = target.Position
             moved = false
         end
     end)
@@ -223,9 +255,9 @@ local function makeTapOrDrag(obj, onClick, dragTarget)
         if input.UserInputType == Enum.UserInputType.MouseMovement
         or input.UserInputType == Enum.UserInputType.Touch then
             local delta = input.Position - startPos
-            if delta.Magnitude > 8 then
+            if delta.Magnitude > 25 then
                 moved = true
-                dragTarget.Position = UDim2.new(
+                target.Position = UDim2.new(
                     startObjPos.X.Scale, startObjPos.X.Offset + delta.X,
                     startObjPos.Y.Scale, startObjPos.Y.Offset + delta.Y
                 )
@@ -233,29 +265,15 @@ local function makeTapOrDrag(obj, onClick, dragTarget)
         end
     end)
     UserInputService.InputEnded:Connect(function(input)
-        if not startPos then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
-            if not moved then
-                onClick()
-            end
             startPos = nil
             moved = false
         end
     end)
 end
 
-makeTapOrDrag(Circle, function()
-    Circle.Visible = false
-    Main.Visible = true
-end, Circle)
-
-Minimize.MouseButton1Click:Connect(function()
-    Main.Visible = false
-    Circle.Visible = true
-end)
-
-makeTapOrDrag(HeaderTitle, function() end, Main)
+makeDrag(HeaderTitle, Main)
 
 local scrollLocks = {}
 local function lockScroll(scroll)
@@ -289,6 +307,7 @@ local function addToggle(scroll, name, default, callback)
     btn.Size = UDim2.new(1, 0, 1, 0)
     btn.BackgroundTransparency = 1
     btn.Text = ""
+    btn.AutoButtonColor = false
     btn.ZIndex = 19
     btn.Parent = cell
 
@@ -319,13 +338,15 @@ local function addToggle(scroll, name, default, callback)
     pc.CornerRadius = UDim.new(1, 0)
 
     local state = default
-    btn.MouseButton1Click:Connect(function()
+    local function fire()
         state = not state
         pill.BackgroundColor3 = state and Color3.fromRGB(60, 20, 60) or Color3.fromRGB(40, 40, 48)
         pill.TextColor3 = state and Color3.fromRGB(255, 120, 255) or Color3.fromRGB(160, 160, 160)
         pill.Text = state and "BẬT" or "TẮT"
         callback(state)
-    end)
+    end
+    btn.MouseButton1Down:Connect(fire)
+    btn.MouseButton1Click:Connect(fire)
 end
 
 local function addSlider(scroll, name, min, max, default, callback)
@@ -344,8 +365,8 @@ local function addSlider(scroll, name, min, max, default, callback)
     label.Parent = cell
 
     local bar = Instance.new("Frame")
-    bar.Size = UDim2.new(1, -16, 0, 14)
-    bar.Position = UDim2.new(0, 8, 1, -26)
+    bar.Size = UDim2.new(1, -16, 0, 16)
+    bar.Position = UDim2.new(0, 8, 1, -28)
     bar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
     bar.BorderSizePixel = 0
     bar.ZIndex = 19
@@ -362,6 +383,14 @@ local function addSlider(scroll, name, min, max, default, callback)
     local fc = Instance.new("UICorner", fill)
     fc.CornerRadius = UDim.new(1, 0)
 
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 1, 0)
+    btn.BackgroundTransparency = 1
+    btn.Text = ""
+    btn.AutoButtonColor = false
+    btn.ZIndex = 21
+    btn.Parent = bar
+
     local dragging = false
     local function setFromX(x)
         local pct = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
@@ -371,7 +400,7 @@ local function addSlider(scroll, name, min, max, default, callback)
         callback(val)
     end
 
-    bar.InputBegan:Connect(function(input)
+    btn.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
@@ -406,6 +435,7 @@ local function addHold(scroll, name, onStart, onEnd)
     btn.TextSize = 13
     btn.TextWrapped = true
     btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
     btn.ZIndex = 19
     btn.Parent = cell
     local bc = Instance.new("UICorner", btn)
@@ -444,12 +474,21 @@ local function addAction(scroll, name, callback)
     btn.TextSize = 13
     btn.TextWrapped = true
     btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
     btn.ZIndex = 19
     btn.Parent = cell
     local bc = Instance.new("UICorner", btn)
     bc.CornerRadius = UDim.new(0, 8)
 
-    btn.MouseButton1Click:Connect(callback)
+    local fired = false
+    btn.MouseButton1Down:Connect(function()
+        fired = true
+        callback()
+    end)
+    btn.MouseButton1Click:Connect(function()
+        if not fired then callback() end
+        fired = false
+    end)
 end
 
 local function applyESP(char)
@@ -733,4 +772,4 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end
 end)
 
-print("[ollie] menu ngang đã tải — chạm nút tròn để mở, olivia")
+print("[ollie] menu ngang đã tải — chạm nút tròn mở menu, olivia")
