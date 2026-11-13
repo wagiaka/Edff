@@ -2,17 +2,10 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
-
-local function getHui()
-    if gethui then
-        local ok, hui = pcall(gethui)
-        if ok and hui then return hui end
-    end
-    return game:GetService("CoreGui")
-end
 
 local Config = {
     ESP = false,
@@ -39,21 +32,17 @@ local noclipSaved = {}
 local function notify(text)
     local gui = Instance.new("ScreenGui")
     gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.DisplayOrder = 999
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-    gui.Parent = getHui()
+    gui.Parent = CoreGui
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(0, 240, 0, 40)
-    frame.Position = UDim2.new(0.5, -120, 0, -56)
+    frame.Position = UDim2.new(0.5, -120, 0, -60)
     frame.BackgroundColor3 = Color3.fromRGB(30, 20, 40)
     frame.BorderSizePixel = 0
-    frame.ZIndex = 10
     frame.Parent = gui
     local c = Instance.new("UICorner", frame)
     c.CornerRadius = UDim.new(0, 10)
-    local s = Instance.new("UIStroke", frame)
-    s.Color = Color3.fromRGB(255, 90, 255)
+    local stroke = Instance.new("UIStroke", frame)
+    stroke.Color = Color3.fromRGB(255, 90, 255)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, 0, 1, 0)
     lbl.BackgroundTransparency = 1
@@ -61,350 +50,285 @@ local function notify(text)
     lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
     lbl.Font = Enum.Font.GothamMedium
     lbl.TextSize = 14
-    lbl.ZIndex = 11
     lbl.Parent = frame
     frame:TweenPosition(UDim2.new(0.5, -120, 0, 16), "Out", "Quad", 0.3)
     task.delay(2, function()
-        frame:TweenPosition(UDim2.new(0.5, -120, 0, -56), "In", "Quad", 0.3)
+        frame:TweenPosition(UDim2.new(0.5, -120, 0, -60), "In", "Quad", 0.3)
         task.wait(0.4)
         gui:Destroy()
     end)
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ollie_menu"
+ScreenGui.Name = "ollie_menu_horizontal"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.IgnoreGuiInset = true
-ScreenGui.DisplayOrder = 600
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-ScreenGui.Parent = getHui()
+ScreenGui.Parent = CoreGui
 
 local Circle = Instance.new("TextButton")
-Circle.Name = "Circle"
-Circle.Size = UDim2.new(0, 60, 0, 60)
-Circle.Position = UDim2.new(0, 16, 0.5, -30)
+Circle.Size = UDim2.new(0, 50, 0, 50)
+Circle.Position = UDim2.new(0, 12, 0.5, -25)
 Circle.BackgroundColor3 = Color3.fromRGB(30, 20, 40)
 Circle.Text = "o"
 Circle.TextColor3 = Color3.fromRGB(255, 90, 255)
 Circle.Font = Enum.Font.GothamBold
-Circle.TextSize = 30
+Circle.TextSize = 26
 Circle.BorderSizePixel = 0
 Circle.Active = true
-Circle.Selectable = false
-Circle.AutoButtonColor = false
-Circle.ZIndex = 20
+Circle.Draggable = true
 Circle.Parent = ScreenGui
 local cc = Instance.new("UICorner", Circle)
 cc.CornerRadius = UDim.new(1, 0)
-local cstroke = Instance.new("UIStroke", Circle)
-cstroke.Color = Color3.fromRGB(255, 90, 255)
-cstroke.Thickness = 2
+local cs = Instance.new("UIStroke", Circle)
+cs.Color = Color3.fromRGB(255, 90, 255)
+cs.Thickness = 2
 
+-- KHUNG CHÍNH NẰM NGANG (520 x 270)
 local Main = Instance.new("Frame")
-Main.Name = "Main"
-Main.Size = UDim2.new(0.94, 0, 0, 200)
-Main.Position = UDim2.new(0.03, 0, 0.5, -100)
+Main.Size = UDim2.new(0, 520, 0, 270)
+Main.Position = UDim2.new(0.5, -260, 0.5, -135)
 Main.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
 Main.BorderSizePixel = 0
-Main.Visible = false
 Main.Active = true
-Main.ZIndex = 15
+Main.Draggable = true
+Main.Visible = false
 Main.Parent = ScreenGui
 local mc = Instance.new("UICorner", Main)
 mc.CornerRadius = UDim.new(0, 12)
-local mstroke = Instance.new("UIStroke", Main)
-mstroke.Color = Color3.fromRGB(200, 40, 200)
-mstroke.Thickness = 2
-mstroke.Transparency = 0.2
+local ms = Instance.new("UIStroke", Main)
+ms.Color = Color3.fromRGB(200, 40, 200)
+ms.Thickness = 2
+ms.Transparency = 0.2
 
 local Header = Instance.new("Frame")
-Header.Name = "Header"
-Header.Size = UDim2.new(1, 0, 0, 40)
+Header.Size = UDim2.new(1, 0, 0, 42)
 Header.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 Header.BorderSizePixel = 0
-Header.Active = true
-Header.ZIndex = 16
 Header.Parent = Main
 local hc = Instance.new("UICorner", Header)
 hc.CornerRadius = UDim.new(0, 12)
 
-local HeaderTitle = Instance.new("TextLabel")
-HeaderTitle.Name = "HeaderTitle"
-HeaderTitle.Size = UDim2.new(1, -56, 1, 0)
-HeaderTitle.Position = UDim2.new(0, 14, 0, 0)
-HeaderTitle.BackgroundTransparency = 1
-HeaderTitle.Text = "ollie  ·  roblox"
-HeaderTitle.TextColor3 = Color3.fromRGB(255, 90, 255)
-HeaderTitle.Font = Enum.Font.GothamBold
-HeaderTitle.TextSize = 15
-HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
-HeaderTitle.ZIndex = 17
-HeaderTitle.Parent = Header
-
-local Minimize = Instance.new("TextButton")
-Minimize.Name = "Minimize"
-Minimize.Size = UDim2.new(0, 44, 1, 0)
-Minimize.Position = UDim2.new(1, -44, 0, 0)
-Minimize.BackgroundTransparency = 1
-Minimize.Text = "−"
-Minimize.TextColor3 = Color3.fromRGB(255, 90, 255)
-Minimize.Font = Enum.Font.GothamBold
-Minimize.TextSize = 24
-Minimize.AutoButtonColor = false
-Minimize.Active = true
-Minimize.ZIndex = 18
-Minimize.Parent = Header
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(0, 140, 1, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "  ollie · menu"
+Title.TextColor3 = Color3.fromRGB(255, 90, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 16
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Header
 
 local TabBar = Instance.new("Frame")
-TabBar.Size = UDim2.new(1, 0, 0, 32)
-TabBar.Position = UDim2.new(0, 0, 0, 40)
-TabBar.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-TabBar.BorderSizePixel = 0
-TabBar.ZIndex = 16
-TabBar.Parent = Main
+TabBar.Size = UDim2.new(1, -190, 1, -10)
+TabBar.Position = UDim2.new(0, 145, 0, 5)
+TabBar.BackgroundTransparency = 1
+TabBar.Parent = Header
 
-local tabNames = {"Chạy", "Bay", "Hành động", "ESP"}
-local tabButtons = {}
-local tabContents = {}
+local tabLayout = Instance.new("UIListLayout", TabBar)
+tabLayout.FillDirection = Enum.FillDirection.Horizontal
+tabLayout.Padding = UDim.new(0, 6)
+tabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 
-local ContentArea = Instance.new("Frame")
-ContentArea.Size = UDim2.new(1, 0, 1, -72)
-ContentArea.Position = UDim2.new(0, 0, 0, 72)
-ContentArea.BackgroundTransparency = 1
-ContentArea.ZIndex = 16
-ContentArea.Parent = Main
+local Close = Instance.new("TextButton")
+Close.Size = UDim2.new(0, 42, 0, 42)
+Close.Position = UDim2.new(1, -42, 0, 0)
+Close.BackgroundTransparency = 1
+Close.Text = "−"
+Close.TextColor3 = Color3.fromRGB(255, 90, 255)
+Close.Font = Enum.Font.GothamBold
+Close.TextSize = 24
+Close.Parent = Header
 
-for i, name in ipairs(tabNames) do
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1/4, 0, 1, 0)
-    btn.Position = UDim2.new((i-1)/4, 0, 0, 0)
-    btn.BackgroundColor3 = i == 1 and Color3.fromRGB(45, 25, 55) or Color3.fromRGB(20, 20, 25)
-    btn.Text = name
-    btn.TextColor3 = i == 1 and Color3.fromRGB(255, 120, 255) or Color3.fromRGB(160, 160, 160)
-    btn.Font = Enum.Font.GothamMedium
-    btn.TextSize = 13
-    btn.BorderSizePixel = 0
-    btn.AutoButtonColor = false
-    btn.ZIndex = 17
-    btn.Parent = TabBar
-    tabButtons[i] = btn
+local ContentContainer = Instance.new("Frame")
+ContentContainer.Size = UDim2.new(1, -16, 1, -50)
+ContentContainer.Position = UDim2.new(0, 8, 0, 46)
+ContentContainer.BackgroundTransparency = 1
+ContentContainer.Parent = Main
 
-    local scroll = Instance.new("ScrollingFrame")
-    scroll.Size = UDim2.new(1, -8, 1, -8)
-    scroll.Position = UDim2.new(0, 4, 0, 4)
-    scroll.BackgroundTransparency = 1
-    scroll.BorderSizePixel = 0
-    scroll.ScrollBarThickness = 3
-    scroll.ScrollBarImageColor3 = Color3.fromRGB(255, 90, 255)
-    scroll.ScrollDirection = Enum.ScrollDirection.Horizontal
-    scroll.AutomaticCanvasSize = Enum.AutomaticSize.X
-    scroll.CanvasSize = UDim2.new(0, 0, 1, 0)
-    scroll.Visible = (i == 1)
-    scroll.ZIndex = 17
-    scroll.Parent = ContentArea
-    tabContents[i] = scroll
-
-    local layout = Instance.new("UIListLayout")
-    layout.FillDirection = Enum.FillDirection.Horizontal
-    layout.Padding = UDim.new(0, 8)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Parent = scroll
-end
-
-for i, btn in ipairs(tabButtons) do
-    btn.MouseButton1Click:Connect(function()
-        for j, b in ipairs(tabButtons) do
-            b.BackgroundColor3 = j == i and Color3.fromRGB(45, 25, 55) or Color3.fromRGB(20, 20, 25)
-            b.TextColor3 = j == i and Color3.fromRGB(255, 120, 255) or Color3.fromRGB(160, 160, 160)
-        end
-        for j, s in ipairs(tabContents) do
-            s.Visible = (j == i)
-        end
-    end)
-end
-
-local function openMenu()
+Circle.MouseButton1Click:Connect(function()
     Circle.Visible = false
     Main.Visible = true
-end
+end)
 
-local function closeMenu()
+Close.MouseButton1Click:Connect(function()
     Main.Visible = false
     Circle.Visible = true
-end
+end)
 
-Circle.MouseButton1Down:Connect(openMenu)
-Circle.MouseButton1Click:Connect(openMenu)
-Circle.Activated:Connect(openMenu)
+local Tabs = {}
+local TabButtons = {}
 
-Minimize.MouseButton1Down:Connect(closeMenu)
-Minimize.MouseButton1Click:Connect(closeMenu)
+local function createTab(tabName)
+    local TabBtn = Instance.new("TextButton")
+    TabBtn.Size = UDim2.new(0, 100, 1, 0)
+    TabBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+    TabBtn.Text = tabName
+    TabBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+    TabBtn.Font = Enum.Font.GothamBold
+    TabBtn.TextSize = 13
+    TabBtn.BorderSizePixel = 0
+    TabBtn.Parent = TabBar
+    local tc = Instance.new("UICorner", TabBtn)
+    tc.CornerRadius = UDim.new(0, 8)
 
-local function makeDrag(handle, target)
-    local startPos, startObjPos, moved
-    handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            startPos = input.Position
-            startObjPos = target.Position
-            moved = false
+    local Page = Instance.new("ScrollingFrame")
+    Page.Size = UDim2.new(1, 0, 1, 0)
+    Page.BackgroundTransparency = 1
+    Page.BorderSizePixel = 0
+    Page.ScrollBarThickness = 3
+    Page.ScrollBarImageColor3 = Color3.fromRGB(255, 90, 255)
+    Page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    Page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Page.Visible = false
+    Page.Parent = ContentContainer
+
+    local grid = Instance.new("UIGridLayout", Page)
+    grid.CellSize = UDim2.new(0.49, 0, 0, 48)
+    grid.CellPadding = UDim2.new(0.02, 0, 0, 8)
+    grid.SortOrder = Enum.SortOrder.LayoutOrder
+
+    TabBtn.MouseButton1Click:Connect(function()
+        for _, p in pairs(Tabs) do p.Visible = false end
+        for _, b in pairs(TabButtons) do
+            b.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+            b.TextColor3 = Color3.fromRGB(180, 180, 180)
         end
+        Page.Visible = true
+        TabBtn.BackgroundColor3 = Color3.fromRGB(75, 25, 75)
+        TabBtn.TextColor3 = Color3.fromRGB(255, 130, 255)
     end)
-    UserInputService.InputChanged:Connect(function(input)
-        if not startPos then return end
-        if input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch then
-            local delta = input.Position - startPos
-            if delta.Magnitude > 25 then
-                moved = true
-                target.Position = UDim2.new(
-                    startObjPos.X.Scale, startObjPos.X.Offset + delta.X,
-                    startObjPos.Y.Scale, startObjPos.Y.Offset + delta.Y
-                )
-            end
-        end
-    end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            startPos = nil
-            moved = false
-        end
-    end)
-end
 
-makeDrag(HeaderTitle, Main)
+    table.insert(Tabs, Page)
+    table.insert(TabButtons, TabBtn)
 
-local scrollLocks = {}
-local function lockScroll(scroll)
-    scrollLocks[scroll] = (scrollLocks[scroll] or 0) + 1
-    scroll.ScrollingEnabled = false
-end
-local function unlockScroll(scroll)
-    scrollLocks[scroll] = math.max(0, (scrollLocks[scroll] or 0) - 1)
-    if scrollLocks[scroll] == 0 then
-        scroll.ScrollingEnabled = true
+    if #Tabs == 1 then
+        Page.Visible = true
+        TabBtn.BackgroundColor3 = Color3.fromRGB(75, 25, 75)
+        TabBtn.TextColor3 = Color3.fromRGB(255, 130, 255)
     end
+
+    return Page
 end
 
-local function makeCell(scroll, width)
-    local cell = Instance.new("Frame")
-    cell.Size = UDim2.new(0, width, 1, 0)
-    cell.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-    cell.BorderSizePixel = 0
-    cell.ZIndex = 18
-    cell.Parent = scroll
-    local c = Instance.new("UICorner")
+local TabPlayer = createTab("Nhân vật")
+local TabFly = createTab("Bay & Di chuyển")
+local TabMisc = createTab("Tiện ích")
+
+local function addToggle(parent, name, default, callback)
+    local Btn = Instance.new("TextButton")
+    Btn.BackgroundColor3 = default and Color3.fromRGB(60, 20, 60) or Color3.fromRGB(25, 25, 30)
+    Btn.Text = "  " .. name .. " [" .. (default and "BẬT" or "TẮT") .. "]"
+    Btn.TextColor3 = default and Color3.fromRGB(255, 120, 255) or Color3.fromRGB(200, 200, 200)
+    Btn.Font = Enum.Font.GothamMedium
+    Btn.TextSize = 13
+    Btn.TextXAlignment = Enum.TextXAlignment.Left
+    Btn.BorderSizePixel = 0
+    Btn.AutoButtonColor = false
+    Btn.Parent = parent
+    local c = Instance.new("UICorner", Btn)
     c.CornerRadius = UDim.new(0, 8)
-    c.Parent = cell
-    return cell
-end
-
-local function addToggle(scroll, name, default, callback)
-    local cell = makeCell(scroll, 100)
-
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 1, 0)
-    btn.BackgroundTransparency = 1
-    btn.Text = ""
-    btn.AutoButtonColor = false
-    btn.ZIndex = 19
-    btn.Parent = cell
-
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -8, 0.5, 0)
-    label.Position = UDim2.new(0, 4, 0, 6)
-    label.BackgroundTransparency = 1
-    label.Text = name
-    label.TextColor3 = Color3.fromRGB(220, 220, 220)
-    label.Font = Enum.Font.GothamMedium
-    label.TextSize = 12
-    label.TextWrapped = true
-    label.ZIndex = 19
-    label.Parent = cell
-
-    local pill = Instance.new("TextLabel")
-    pill.Size = UDim2.new(1, -16, 0, 24)
-    pill.Position = UDim2.new(0, 8, 1, -30)
-    pill.BackgroundColor3 = default and Color3.fromRGB(60, 20, 60) or Color3.fromRGB(40, 40, 48)
-    pill.Text = default and "BẬT" or "TẮT"
-    pill.TextColor3 = default and Color3.fromRGB(255, 120, 255) or Color3.fromRGB(160, 160, 160)
-    pill.Font = Enum.Font.GothamBold
-    pill.TextSize = 11
-    pill.BorderSizePixel = 0
-    pill.ZIndex = 19
-    pill.Parent = cell
-    local pc = Instance.new("UICorner", pill)
-    pc.CornerRadius = UDim.new(1, 0)
-
     local state = default
-    local function fire()
+    Btn.MouseButton1Click:Connect(function()
         state = not state
-        pill.BackgroundColor3 = state and Color3.fromRGB(60, 20, 60) or Color3.fromRGB(40, 40, 48)
-        pill.TextColor3 = state and Color3.fromRGB(255, 120, 255) or Color3.fromRGB(160, 160, 160)
-        pill.Text = state and "BẬT" or "TẮT"
+        Btn.BackgroundColor3 = state and Color3.fromRGB(60, 20, 60) or Color3.fromRGB(25, 25, 30)
+        Btn.TextColor3 = state and Color3.fromRGB(255, 120, 255) or Color3.fromRGB(200, 200, 200)
+        Btn.Text = "  " .. name .. " [" .. (state and "BẬT" or "TẮT") .. "]"
         callback(state)
-    end
-    btn.MouseButton1Down:Connect(fire)
-    btn.MouseButton1Click:Connect(fire)
+    end)
+    return Btn
 end
 
-local function addSlider(scroll, name, min, max, default, callback)
-    local cell = makeCell(scroll, 100)
+local function addButton(parent, name, callback)
+    local Btn = Instance.new("TextButton")
+    Btn.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+    Btn.Text = "  " .. name
+    Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Btn.Font = Enum.Font.GothamMedium
+    Btn.TextSize = 13
+    Btn.TextXAlignment = Enum.TextXAlignment.Left
+    Btn.BorderSizePixel = 0
+    Btn.Parent = parent
+    local c = Instance.new("UICorner", Btn)
+    c.CornerRadius = UDim.new(0, 8)
+    Btn.MouseButton1Click:Connect(callback)
+    return Btn
+end
 
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -8, 0, 40)
-    label.Position = UDim2.new(0, 4, 0, 6)
-    label.BackgroundTransparency = 1
-    label.Text = name .. "\n" .. default
-    label.TextColor3 = Color3.fromRGB(220, 220, 220)
-    label.Font = Enum.Font.GothamMedium
-    label.TextSize = 12
-    label.TextWrapped = true
-    label.ZIndex = 19
-    label.Parent = cell
+local function addHoldButton(parent, name, onStart, onEnd)
+    local Btn = Instance.new("TextButton")
+    Btn.BackgroundColor3 = Color3.fromRGB(45, 25, 55)
+    Btn.Text = "  " .. name
+    Btn.TextColor3 = Color3.fromRGB(255, 180, 255)
+    Btn.Font = Enum.Font.GothamMedium
+    Btn.TextSize = 13
+    Btn.TextXAlignment = Enum.TextXAlignment.Left
+    Btn.BorderSizePixel = 0
+    Btn.Parent = parent
+    local c = Instance.new("UICorner", Btn)
+    c.CornerRadius = UDim.new(0, 8)
+    Btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            onStart()
+        end
+    end)
+    Btn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            onEnd()
+        end
+    end)
+    return Btn
+end
 
-    local bar = Instance.new("Frame")
-    bar.Size = UDim2.new(1, -16, 0, 16)
-    bar.Position = UDim2.new(0, 8, 1, -28)
-    bar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-    bar.BorderSizePixel = 0
-    bar.ZIndex = 19
-    bar.Parent = cell
-    local bc = Instance.new("UICorner", bar)
+local function addSlider(parent, name, min, max, default, callback)
+    local Holder = Instance.new("Frame")
+    Holder.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    Holder.BorderSizePixel = 0
+    Holder.Parent = parent
+    local c = Instance.new("UICorner", Holder)
+    c.CornerRadius = UDim.new(0, 8)
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -16, 0, 20)
+    Label.Position = UDim2.new(0, 8, 0, 3)
+    Label.BackgroundTransparency = 1
+    Label.Text = name .. ": " .. default
+    Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Label.Font = Enum.Font.GothamMedium
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = Holder
+
+    local Bar = Instance.new("Frame")
+    Bar.Size = UDim2.new(1, -16, 0, 12)
+    Bar.Position = UDim2.new(0, 8, 0, 28)
+    Bar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    Bar.BorderSizePixel = 0
+    Bar.Parent = Holder
+    local bc = Instance.new("UICorner", Bar)
     bc.CornerRadius = UDim.new(1, 0)
 
-    local fill = Instance.new("Frame")
-    fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
-    fill.BackgroundColor3 = Color3.fromRGB(255, 90, 255)
-    fill.BorderSizePixel = 0
-    fill.ZIndex = 20
-    fill.Parent = bar
-    local fc = Instance.new("UICorner", fill)
+    local Fill = Instance.new("Frame")
+    Fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    Fill.BackgroundColor3 = Color3.fromRGB(255, 90, 255)
+    Fill.BorderSizePixel = 0
+    Fill.Parent = Bar
+    local fc = Instance.new("UICorner", Fill)
     fc.CornerRadius = UDim.new(1, 0)
-
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 1, 0)
-    btn.BackgroundTransparency = 1
-    btn.Text = ""
-    btn.AutoButtonColor = false
-    btn.ZIndex = 21
-    btn.Parent = bar
 
     local dragging = false
     local function setFromX(x)
-        local pct = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        local pct = math.clamp((x - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
         local val = math.floor(min + pct * (max - min) + 0.5)
-        fill.Size = UDim2.new(pct, 0, 1, 0)
-        label.Text = name .. "\n" .. val
+        Fill.Size = UDim2.new(pct, 0, 1, 0)
+        Label.Text = name .. ": " .. val
         callback(val)
     end
 
-    btn.InputBegan:Connect(function(input)
+    Bar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
-            lockScroll(scroll)
             setFromX(input.Position.X)
         end
     end)
@@ -415,80 +339,12 @@ local function addSlider(scroll, name, min, max, default, callback)
         end
     end)
     UserInputService.InputEnded:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch) then
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
-            unlockScroll(scroll)
         end
     end)
-end
-
-local function addHold(scroll, name, onStart, onEnd)
-    local cell = makeCell(scroll, 100)
-
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 1, 0)
-    btn.BackgroundColor3 = Color3.fromRGB(45, 25, 55)
-    btn.Text = name
-    btn.TextColor3 = Color3.fromRGB(255, 180, 255)
-    btn.Font = Enum.Font.GothamMedium
-    btn.TextSize = 13
-    btn.TextWrapped = true
-    btn.BorderSizePixel = 0
-    btn.AutoButtonColor = false
-    btn.ZIndex = 19
-    btn.Parent = cell
-    local bc = Instance.new("UICorner", btn)
-    bc.CornerRadius = UDim.new(0, 8)
-
-    local idle = Color3.fromRGB(45, 25, 55)
-    local pressed = Color3.fromRGB(120, 40, 140)
-
-    btn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            lockScroll(scroll)
-            btn.BackgroundColor3 = pressed
-            onStart()
-        end
-    end)
-    btn.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            unlockScroll(scroll)
-            btn.BackgroundColor3 = idle
-            onEnd()
-        end
-    end)
-end
-
-local function addAction(scroll, name, callback)
-    local cell = makeCell(scroll, 100)
-
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 1, 0)
-    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
-    btn.Text = name
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.GothamMedium
-    btn.TextSize = 13
-    btn.TextWrapped = true
-    btn.BorderSizePixel = 0
-    btn.AutoButtonColor = false
-    btn.ZIndex = 19
-    btn.Parent = cell
-    local bc = Instance.new("UICorner", btn)
-    bc.CornerRadius = UDim.new(0, 8)
-
-    local fired = false
-    btn.MouseButton1Down:Connect(function()
-        fired = true
-        callback()
-    end)
-    btn.MouseButton1Click:Connect(function()
-        if not fired then callback() end
-        fired = false
-    end)
+    return Holder
 end
 
 local function applyESP(char)
@@ -563,20 +419,8 @@ local function applyNoclip(state)
     end
 end
 
-local flyBV, flyBG
-
-local function stopFly()
-    if flyBV then flyBV:Destroy(); flyBV = nil end
-    if flyBG then flyBG:Destroy(); flyBG = nil end
-    local char = LocalPlayer.Character
-    if char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.PlatformStand = false
-            hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-        end
-    end
-end
+-- === HỆ THỐNG BAY MỚI (SMOOTH CFRAME FLY) ===
+local flyPart = nil
 
 local function setupFly()
     local char = LocalPlayer.Character
@@ -584,100 +428,121 @@ local function setupFly()
     local hrp = char:FindFirstChild("HumanoidRootPart")
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hrp or not hum then return end
-    stopFly()
+    
     hum.PlatformStand = true
     hum:ChangeState(Enum.HumanoidStateType.Physics)
-    hrp.Anchored = false
-    flyBV = Instance.new("BodyVelocity")
-    flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-    flyBV.Velocity = Vector3.zero
-    flyBV.Parent = hrp
-    flyBG = Instance.new("BodyGyro")
-    flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
-    flyBG.P = 9e4
-    flyBG.D = 500
-    flyBG.CFrame = hrp.CFrame
-    flyBG.Parent = hrp
 end
 
-local tMove = tabContents[1]
-addToggle(tMove, "Tốc độ chạy", false, function(s)
+local function stopFly()
+    local char = LocalPlayer.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.PlatformStand = false
+            hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+        end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            for _, v in ipairs(hrp:GetChildren()) do
+                if v:IsA("BodyVelocity") or v:IsA("BodyGyro") then
+                    v:Destroy()
+                end
+            end
+        end
+    end
+end
+
+-- === TAB 1: NHÂN VẬT ===
+addToggle(TabPlayer, "Tốc độ chạy", false, function(s)
     Config.Speed = s
     local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     if hum then hum.WalkSpeed = s and Config.SpeedValue or 16 end
 end)
-addSlider(tMove, "Tốc độ", 16, 250, 50, function(v)
+addSlider(TabPlayer, "Mức tốc độ", 16, 250, 50, function(v)
     Config.SpeedValue = v
     if Config.Speed then
         local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum then hum.WalkSpeed = v end
     end
 end)
-addToggle(tMove, "Độ cao nhảy", false, function(s)
+
+addToggle(TabPlayer, "Độ cao nhảy", false, function(s)
     Config.JumpPower = s
     local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     if hum then hum.UseJumpPower = true; hum.JumpPower = s and Config.JumpValue or 50 end
 end)
-addSlider(tMove, "Nhảy cao", 50, 500, 100, function(v)
+addSlider(TabPlayer, "Mức nhảy", 50, 500, 100, function(v)
     Config.JumpValue = v
     if Config.JumpPower then
         local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum then hum.JumpPower = v end
     end
 end)
-addToggle(tMove, "Nhảy vô hạn", false, function(s)
+
+addToggle(TabPlayer, "Nhảy vô hạn", false, function(s)
     Config.InfiniteJump = s
 end)
-addToggle(tMove, "Xuyên tường", false, function(s)
+
+addToggle(TabPlayer, "ESP Người chơi", false, function(s)
+    Config.ESP = s
+    refreshESP()
+end)
+
+-- === TAB 2: BAY & DI CHUYỂN ===
+addToggle(TabFly, "Bật Bay", false, function(s)
+    Config.Fly = s
+    if s then setupFly() else stopFly() end
+end)
+addSlider(TabFly, "Tốc độ bay", 20, 300, 60, function(v)
+    Config.FlySpeed = v
+end)
+
+addToggle(TabFly, "Xuyên tường", false, function(s)
     Config.Noclip = s
     applyNoclip(s)
 end)
 
-local tFly = tabContents[2]
-addToggle(tFly, "Bay", false, function(s)
-    Config.Fly = s
-    if s then setupFly() else stopFly() end
-end)
-addSlider(tFly, "Tốc độ bay", 20, 300, 60, function(v)
-    Config.FlySpeed = v
-end)
-addHold(tFly, "Bay lên", function() Config.FlyUp = true end, function() Config.FlyUp = false end)
-addHold(tFly, "Bay xuống", function() Config.FlyDown = true end, function() Config.FlyDown = false end)
-addHold(tFly, "Bay tới", function() Config.FlyForward = true end, function() Config.FlyForward = false end)
-addHold(tFly, "Bay lùi", function() Config.FlyBack = true end, function() Config.FlyBack = false end)
-addHold(tFly, "Bay trái", function() Config.FlyLeft = true end, function() Config.FlyLeft = false end)
-addHold(tFly, "Bay phải", function() Config.FlyRight = true end, function() Config.FlyRight = false end)
+addHoldButton(TabFly, "Giữ: Bay lên", function() Config.FlyUp = true end, function() Config.FlyUp = false end)
+addHoldButton(TabFly, "Giữ: Bay tới", function() Config.FlyForward = true end, function() Config.FlyForward = false end)
+addHoldButton(TabFly, "Giữ: Bay xuống", function() Config.FlyDown = true end, function() Config.FlyDown = false end)
+addHoldButton(TabFly, "Giữ: Bay lui", function() Config.FlyBack = true end, function() Config.FlyBack = false end)
+addHoldButton(TabFly, "Giữ: Bay trái", function() Config.FlyLeft = true end, function() Config.FlyLeft = false end)
+addHoldButton(TabFly, "Giữ: Bay phải", function() Config.FlyRight = true end, function() Config.FlyRight = false end)
 
-local tAct = tabContents[3]
-addAction(tAct, "Lưu vị trí", function()
+-- === TAB 3: TIỆN ÍCH ===
+addButton(TabMisc, "Lưu vị trí", function()
     local char = LocalPlayer.Character
     if char and char:FindFirstChild("HumanoidRootPart") then
         Config.SavedPos = char.HumanoidRootPart.CFrame
         notify("Đã lưu vị trí")
     end
 end)
-addAction(tAct, "Dịch chuyển", function()
+
+addButton(TabMisc, "Dịch chuyển vị trí lưu", function()
     local char = LocalPlayer.Character
     if char and char:FindFirstChild("HumanoidRootPart") and Config.SavedPos then
         char.HumanoidRootPart.CFrame = Config.SavedPos
         notify("Đã dịch chuyển")
     end
 end)
-addAction(tAct, "Bán TẤT CẢ", function()
+
+addButton(TabMisc, "Bán TẤT CẢ", function()
     local ev = ReplicatedStorage:FindFirstChild("SellEvent")
     if ev and ev:IsA("RemoteEvent") then
         ev:FireServer("SellAll")
         notify("Đã gửi lệnh bán")
     end
 end)
-addAction(tAct, "Nâng balo", function()
+
+addButton(TabMisc, "Nâng cấp balo", function()
     local ev = ReplicatedStorage:FindFirstChild("UpgradeEvent")
     if ev and ev:IsA("RemoteEvent") then
         ev:FireServer("Pocket", 1)
         notify("Đã nâng cấp balo")
     end
 end)
-addAction(tAct, "Nâng tầm nhìn", function()
+
+addButton(TabMisc, "Nâng cấp tầm nhìn", function()
     local ev = ReplicatedStorage:FindFirstChild("UpgradeEvent")
     if ev and ev:IsA("RemoteEvent") then
         ev:FireServer("Eyesight", 2)
@@ -685,12 +550,7 @@ addAction(tAct, "Nâng tầm nhìn", function()
     end
 end)
 
-local tESP = tabContents[4]
-addToggle(tESP, "ESP người chơi", false, function(s)
-    Config.ESP = s
-    refreshESP()
-end)
-
+-- VÒNG LẶP XỬ LÝ CHÍNH
 RunService.Heartbeat:Connect(function()
     if Config.ESP then
         for _, plr in ipairs(Players:GetPlayers()) do
@@ -718,37 +578,44 @@ UserInputService.JumpRequest:Connect(function()
     end
 end)
 
-RunService.RenderStepped:Connect(function()
+-- XỬ LÝ BAY MƯỢT BẰNG C_FRAME HOẶC VELOCITY CẢI TIẾN
+RunService.RenderStepped:Connect(function(dt)
     if not Config.Fly then return end
     local char = LocalPlayer.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum or not flyBV or not flyBG then return end
+    if not hrp or not hum then return end
 
     local camCF = Camera.CFrame
-    local dir = Vector3.zero
+    local moveDir = Vector3.zero
 
-    if Config.FlyForward then dir = dir + camCF.LookVector end
-    if Config.FlyBack then dir = dir - camCF.LookVector end
-    if Config.FlyLeft then dir = dir - camCF.RightVector end
-    if Config.FlyRight then dir = dir + camCF.RightVector end
-    if Config.FlyUp then dir = dir + Vector3.new(0, 1, 0) end
-    if Config.FlyDown then dir = dir - Vector3.new(0, 1, 0) end
-
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + camCF.LookVector end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - camCF.LookVector end
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - camCF.RightVector end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + camCF.RightVector end
-    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
-    if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0, 1, 0) end
-
-    if dir.Magnitude > 0 then
-        dir = dir.Unit
+    if hum.MoveDirection.Magnitude > 0.05 then
+        moveDir = hum.MoveDirection.Unit
     end
 
-    flyBV.Velocity = dir * Config.FlySpeed
-    flyBG.CFrame = camCF
+    if Config.FlyForward then moveDir = moveDir + camCF.LookVector end
+    if Config.FlyBack then moveDir = moveDir - camCF.LookVector end
+    if Config.FlyLeft then moveDir = moveDir - camCF.RightVector end
+    if Config.FlyRight then moveDir = moveDir + camCF.RightVector end
+    if Config.FlyUp then moveDir = moveDir + Vector3.new(0, 1, 0) end
+    if Config.FlyDown then moveDir = moveDir - Vector3.new(0, 1, 0) end
+
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camCF.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camCF.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camCF.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camCF.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+
+    if moveDir.Magnitude > 0 then
+        moveDir = moveDir.Unit
+        hrp.Velocity = moveDir * Config.FlySpeed
+    else
+        hrp.Velocity = Vector3.new(0, 0.1, 0) -- Giữ lơ lửng không bị rơi
+    end
+    
+    hrp.CFrame = CFrame.new(hrp.Position, hrp.Position + camCF.LookVector)
 end)
 
 LocalPlayer.CharacterAdded:Connect(function(char)
@@ -772,4 +639,4 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end
 end)
 
-print("[ollie] menu ngang đã tải — chạm nút tròn mở menu, olivia")
+print("[ollie] menu ngang + bay siêu mượt đã được tải!")
