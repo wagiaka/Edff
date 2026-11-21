@@ -30,24 +30,17 @@ local MELEE_WEAPONS = {
     "Scythe","Vampire Scythe","Happy's Scythe",
 }
 
-local WEAPONS = {
-    "Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
-    "Spear","Honey Spear","Morningstar","Katana","Laser Sword","Ice Sword",
-    "Trident","Poison Claws","Poison Spear","Infernal Sword",
-    "Cultist King Mace","Brutal Battleaxe","Obsidiron Hammer",
-    "Scythe","Vampire Scythe","Happy's Scythe",
-}
-
 local CFG = {
     Speed        = false, WalkSpeed   = 40,
     Jump         = false, JumpPower   = 90,
     Fly          = false, FlySpeed    = 60,
-    KillAura     = false, KillRadius  = 100,
-    AutoChop     = false, ChopRadius  = 150,
+    Noclip       = false,
+    KillAura     = false, KillRadius  = 150,
+    AutoChop     = false, ChopRadius  = 130,
     AutoDrop     = false,
     ESPChild     = false,
     Fullbright   = false,
-    Delay        = 0.4,
+    Delay        = 0.15,
 }
 
 local TOOL_SUFFIX = "11960515286"
@@ -157,24 +150,46 @@ end)
 local function nextId() hitCounter+=1; return hitCounter.."_"..TOOL_SUFFIX end
 
 -- ===================== SWING =====================
-local function swing(tool, target, p)
-    if not (EquipRE and UnequipRE and DamageRF) then return false end
-    pcall(EquipRE.FireServer,  EquipRE,  "FireAllClients", tool)
-    task.wait(0.05)
+local function hitOnce(tool, target, p)
+    if not DamageRF then return false end
     local ok = pcall(DamageRF.InvokeServer, DamageRF,
         target, tool, nextId(), CFrame.new(p.Position), false)
     if HitSoundRE then
         pcall(HitSoundRE.FireServer, HitSoundRE, "FireAllClients", target, tool)
     end
-    task.wait(0.03)
+    return ok
+end
+
+local function swing(tool, target, p)
+    if not (EquipRE and UnequipRE and DamageRF) then return false end
+    pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
+    task.wait(0.02)
+    local ok = hitOnce(tool, target, p)
+    task.wait(0.015)
     pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
     return ok
+end
+
+local function swingBatch(tool, targets)
+    if not (EquipRE and UnequipRE and DamageRF) or #targets == 0 then return end
+    pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
+    task.wait(0.015)
+    for _, t in ipairs(targets) do
+        if not CFG.KillAura then break end
+        if t.m and t.m.Parent and t.p and t.p.Parent then
+            hitOnce(tool, t.m, t.p)
+        end
+        task.wait(0.015)
+    end
+    pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
 end
 
 -- ===================== KILL AURA =====================
 local SCAN_FOLDERS = {"Characters","Map","Enemies","Mobs","NPCs"}
 local function getAnimals(r)
     local out, ch, seen = {}, LP.Character, {}
+    local maxDistSq = CFG.KillRadius * CFG.KillRadius
+    local rPos = r.Position
     local function tryAdd(o)
         if seen[o] or o==ch then return end
         seen[o] = true
@@ -183,9 +198,10 @@ local function getAnimals(r)
         local h = o:FindFirstChildWhichIsA("Humanoid", true)
         if not (h and h.Health>0) then return end
         local p = partOf(o); if not p then return end
-        local d = (p.Position - r.Position).Magnitude
-        if d <= CFG.KillRadius then
-            table.insert(out, {m=o, p=p, d=d})
+        local delta = p.Position - rPos
+        local dSq = delta.X*delta.X + delta.Y*delta.Y + delta.Z*delta.Z
+        if dSq <= maxDistSq then
+            table.insert(out, {m=o, p=p, dSq=dSq})
         end
     end
     for _, o in ipairs(Workspace:GetChildren()) do
@@ -199,7 +215,7 @@ local function getAnimals(r)
             end
         end
     end
-    table.sort(out, function(a,b) return a.d<b.d end)
+    table.sort(out, function(a,b) return a.dSq<b.dSq end)
     return out
 end
 
@@ -253,9 +269,9 @@ task.spawn(function()
         if CFG.KillAura then
             local r, tool = root(), getKillTool()
             if r and tool then
-                for _, t in ipairs(getAnimals(r)) do
-                    swing(tool, t.m, t.p)
-                    task.wait(0.1)
+                local targets = getAnimals(r)
+                if #targets > 0 then
+                    swingBatch(tool, targets)
                 end
             end
         end
@@ -273,11 +289,41 @@ task.spawn(function()
     end
 end)
 
--- ===================== MOVEMENT =====================
+-- ===================== MOVEMENT & NOCLIP =====================
+local noclipBackup = {}
+
+local function restoreNoclip()
+    for part, wasCollide in pairs(noclipBackup) do
+        if part and part.Parent and part:IsA("BasePart") then
+            pcall(function() part.CanCollide = wasCollide end)
+        end
+        noclipBackup[part] = nil
+    end
+end
+
 RunService.Heartbeat:Connect(function()
     local h = hum(); if not h then return end
     if CFG.Speed then h.WalkSpeed = CFG.WalkSpeed end
     if CFG.Jump  then h.UseJumpPower=true; h.JumpPower=CFG.JumpPower end
+end)
+
+RunService.Stepped:Connect(function()
+    local c = LP.Character
+    if not c then return end
+    if CFG.Noclip then
+        for _, obj in ipairs(c:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                if noclipBackup[obj] == nil then
+                    noclipBackup[obj] = obj.CanCollide
+                end
+                if obj.CanCollide then
+                    obj.CanCollide = false
+                end
+            end
+        end
+    elseif next(noclipBackup) ~= nil then
+        restoreNoclip()
+    end
 end)
 
 -- ===================== FLY =====================
@@ -457,104 +503,122 @@ task.spawn(function()
     end
 end)
 
--- ===================== FIX LAG =====================
+-- ===================== FIX LAG PRO (GỌN & MẠNH) =====================
 local FixLag = false
 local LagBackup = {}
-local LagObjects = {}
+local lagConn = nil
+local lagGen = 0
 
-local function saveProperty(obj, prop)
-    if LagBackup[obj] == nil then
-        LagBackup[obj] = {}
+local HEAVY_MATS = {
+    [Enum.Material.Neon] = Enum.Material.SmoothPlastic,
+    [Enum.Material.Glass] = Enum.Material.SmoothPlastic,
+    [Enum.Material.ForceField] = Enum.Material.SmoothPlastic,
+    [Enum.Material.DiamondPlate] = Enum.Material.SmoothPlastic,
+    [Enum.Material.CorrodedMetal] = Enum.Material.SmoothPlastic,
+    [Enum.Material.Foil] = Enum.Material.SmoothPlastic,
+    [Enum.Material.WoodPlanks] = Enum.Material.SmoothPlastic,
+    [Enum.Material.Cobblestone] = Enum.Material.SmoothPlastic,
+}
+
+local function saveProp(obj, prop)
+    local t = LagBackup[obj]
+    if not t then
+        t = {}
+        LagBackup[obj] = t
     end
-    if LagBackup[obj][prop] == nil then
-        pcall(function()
-            LagBackup[obj][prop] = obj[prop]
-        end)
+    if t[prop] == nil then
+        local ok, val = pcall(function() return obj[prop] end)
+        if ok then t[prop] = val end
     end
 end
 
-local function optimizeObject(obj)
-    if not obj or not obj.Parent then return end
+local function optimizeObj(obj)
+    if not FixLag or not obj or not obj.Parent then return end
 
     if obj:IsA("ParticleEmitter")
     or obj:IsA("Trail")
     or obj:IsA("Beam")
     or obj:IsA("Smoke")
     or obj:IsA("Fire")
-    or obj:IsA("Sparkles") then
-
-        saveProperty(obj, "Enabled")
-        pcall(function()
-            obj.Enabled = false
-        end)
+    or obj:IsA("Sparkles")
+    or obj:IsA("PointLight")
+    or obj:IsA("SpotLight")
+    or obj:IsA("SurfaceLight") then
+        saveProp(obj, "Enabled")
+        pcall(function() obj.Enabled = false end)
+        return
     end
 
     if obj:IsA("BasePart") then
-        saveProperty(obj, "CastShadow")
-        pcall(function()
-            obj.CastShadow = false
-        end)
+        saveProp(obj, "CastShadow")
+        pcall(function() obj.CastShadow = false end)
+
+        saveProp(obj, "Material")
+        local nextMat = HEAVY_MATS[obj.Material] or Enum.Material.Plastic
+        if obj.Material ~= nextMat then
+            pcall(function() obj.Material = nextMat end)
+        end
     end
 end
 
 local function enableFixLag()
     if FixLag then return end
     FixLag = true
+    lagGen += 1
+    local gen = lagGen
 
-    saveProperty(Lighting, "GlobalShadows")
-    Lighting.GlobalShadows = false
-
-    saveProperty(Lighting, "EnvironmentDiffuseScale")
-    Lighting.EnvironmentDiffuseScale = 0
-
-    saveProperty(Lighting, "EnvironmentSpecularScale")
-    Lighting.EnvironmentSpecularScale = 0
-
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        optimizeObject(obj)
+    for _, prop in ipairs({"GlobalShadows", "EnvironmentDiffuseScale", "EnvironmentSpecularScale", "ShadowSoftness"}) do
+        saveProp(Lighting, prop)
     end
+    pcall(function()
+        Lighting.GlobalShadows = false
+        Lighting.EnvironmentDiffuseScale = 0
+        Lighting.EnvironmentSpecularScale = 0
+        Lighting.ShadowSoftness = 0
+    end)
 
-    -- Tối ưu cả vật thể mới xuất hiện
-    if not LagObjects.Connection then
-        LagObjects.Connection = Workspace.DescendantAdded:Connect(function(obj)
-            if FixLag then
-                task.defer(optimizeObject, obj)
-            end
+    if not lagConn then
+        lagConn = Workspace.DescendantAdded:Connect(function(obj)
+            if FixLag then task.defer(optimizeObj, obj) end
         end)
     end
 
-    print("[ollie] Fix Lag ON")
+    task.spawn(function()
+        local all = Workspace:GetDescendants()
+        for i = 1, #all do
+            if not FixLag or gen ~= lagGen then return end
+            optimizeObj(all[i])
+            if i % 500 == 0 then task.wait() end
+        end
+    end)
+
+    print("[ollie] Fix Lag Pro ON")
 end
 
 local function disableFixLag()
     if not FixLag then return end
     FixLag = false
+    lagGen += 1
 
-    if LagObjects.Connection then
-        LagObjects.Connection:Disconnect()
-        LagObjects.Connection = nil
+    if lagConn then
+        lagConn:Disconnect()
+        lagConn = nil
     end
 
-    for obj, properties in pairs(LagBackup) do
+    for obj, props in pairs(LagBackup) do
         if obj and obj.Parent then
-            for prop, value in pairs(properties) do
-                pcall(function()
-                    obj[prop] = value
-                end)
+            for prop, val in pairs(props) do
+                pcall(function() obj[prop] = val end)
             end
         end
     end
 
     LagBackup = {}
-    print("[ollie] Fix Lag OFF")
+    print("[ollie] Fix Lag Pro OFF")
 end
 
 local function setFixLag(value)
-    if value then
-        enableFixLag()
-    else
-        disableFixLag()
-    end
+    if value then enableFixLag() else disableFixLag() end
 end
 
 -- ===================== GUI =====================
@@ -807,7 +871,7 @@ task.spawn(function()
 
 section(t1,"PERFORMANCE")
 
-toggle(t1,"⚡ Fix Lag",function()
+toggle(t1,"⚡ Fix Lag Pro",function()
     return FixLag
 end,function(v)
     setFixLag(v)
@@ -818,6 +882,8 @@ toggle(t1,"Speed",   function() return CFG.Speed end, function(v) CFG.Speed=v en
 toggle(t1,"High Jump",function() return CFG.Jump  end, function(v) CFG.Jump=v end)
 toggle(t1,"Fly",     function() return CFG.Fly   end, function(v)
     CFG.Fly=v; flyPad.Visible=v; if v then startFly() else stopFly() end end)
+toggle(t1,"👻 Đi xuyên tường",function() return CFG.Noclip end, function(v)
+    CFG.Noclip=v; if not v then restoreNoclip() end end)
 toggle(t1,"Fullbright",function() return CFG.Fullbright end, function(v)
     CFG.Fullbright=v; setFullbright(v) end)
 
