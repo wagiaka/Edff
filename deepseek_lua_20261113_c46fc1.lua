@@ -19,6 +19,17 @@ local DragRE     = Remotes and Remotes:FindFirstChild("RequestStartDraggingItem"
 local StopDragRE = Remotes and Remotes:FindFirstChild("StopDraggingItem")
 local HitSoundRE = Remotes and Remotes:FindFirstChild("PlayEnemyHitSound")
 
+local AXES = {
+    "Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
+}
+
+local MELEE_WEAPONS = {
+    "Spear","Honey Spear","Morningstar","Katana","Laser Sword","Ice Sword",
+    "Trident","Poison Claws","Poison Spear","Infernal Sword",
+    "Cultist King Mace","Brutal Battleaxe","Obsidiron Hammer",
+    "Scythe","Vampire Scythe","Happy's Scythe",
+}
+
 local WEAPONS = {
     "Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
     "Spear","Honey Spear","Morningstar","Katana","Laser Sword","Ice Sword",
@@ -65,14 +76,16 @@ local function partOf(m)
     return m:FindFirstChildWhichIsA("BasePart", true)
 end
 
-local function getTool()
-    local inv  = LP:FindFirstChild("Inventory")
-    local char = LP.Character
-    for _, name in ipairs(WEAPONS) do
+local function findFromList(list, inv, char)
+    for _, name in ipairs(list) do
         local t = (inv and inv:FindFirstChild(name))
             or (char and char:FindFirstChild(name))
         if t then return t end
     end
+    return nil
+end
+
+local function getFallbackTool(inv, char)
     if inv then
         local t = inv:FindFirstChildWhichIsA("Tool")
         if t then return t end
@@ -81,6 +94,28 @@ local function getTool()
         end
     end
     return char and char:FindFirstChild("Tool")
+end
+
+-- Ưu tiên vũ khí không phải rìu cho Kill Aura; chỉ dùng rìu nếu không có vũ khí khác
+local function getKillTool()
+    local inv  = LP:FindFirstChild("Inventory")
+    local char = LP.Character
+    return findFromList(MELEE_WEAPONS, inv, char)
+        or findFromList(AXES, inv, char)
+        or getFallbackTool(inv, char)
+end
+
+-- Ưu tiên rìu cho Auto Chop; fallback sang vũ khí/công cụ khác nếu không có rìu
+local function getChopTool()
+    local inv  = LP:FindFirstChild("Inventory")
+    local char = LP.Character
+    return findFromList(AXES, inv, char)
+        or findFromList(MELEE_WEAPONS, inv, char)
+        or getFallbackTool(inv, char)
+end
+
+local function getTool()
+    return getKillTool()
 end
 
 local function getFirePart()
@@ -216,7 +251,7 @@ task.spawn(function()
     while true do
         task.wait(CFG.Delay)
         if CFG.KillAura then
-            local r, tool = root(), getTool()
+            local r, tool = root(), getKillTool()
             if r and tool then
                 for _, t in ipairs(getAnimals(r)) do
                     swing(tool, t.m, t.p)
@@ -225,7 +260,7 @@ task.spawn(function()
             end
         end
         if CFG.AutoChop then
-            local r, tool = root(), getTool()
+            local r, tool = root(), getChopTool()
             if r and tool then
                 local trees = getTrees(r)
                 if #trees > 0 then
@@ -768,7 +803,15 @@ wLbl.Font=Enum.Font.Gotham; wLbl.TextSize=10
 wLbl.TextXAlignment=Enum.TextXAlignment.Left; wLbl.Parent=wRow
 task.spawn(function()
     while true do task.wait(1)
-        local t=getTool(); wLbl.Text="🗡 "..(t and t.Name or "Không có vũ khí") end end)
+        local t=getKillTool(); wLbl.Text="🗡 "..(t and t.Name or "Không có vũ khí") end end)
+
+section(t1,"PERFORMANCE")
+
+toggle(t1,"⚡ Fix Lag",function()
+    return FixLag
+end,function(v)
+    setFixLag(v)
+end)
 
 section(t1,"MOVEMENT")
 toggle(t1,"Speed",   function() return CFG.Speed end, function(v) CFG.Speed=v end)
