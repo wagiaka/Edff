@@ -1,522 +1,725 @@
--- 99 Nights in the Forest — Auto Chop + Kill Aura real remotes + Reveal Map
--- Executor Lua. Dán khi đã vào game.
+-- 99 Nights in the Forest — ollie v4 (PC + mobile)
+-- Dán vào executor khi đã vào game.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
-local UserInputService = game:GetService("UserInputService")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RS = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local LP = Players.LocalPlayer
-local RemoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
+local PlayerGui = LP:WaitForChild("PlayerGui")
 
--- ============ CONFIG (MẶC ĐỊNH TẮT) ============
-local CONFIG = {
-    ESP = false, ESPPlayers = false, ESPItems = false, ESPAnimals = false,
-    AutoCollect = false, Speed = false, WalkSpeed = 60, JumpPower = 90,
-    CollectRadius = 80, ScanInterval = 0.5, CollectAllPrompts = false,
-    Fly = false, FlySpeed = 70, Fullbright = false, Godmode = false,
+-- ================= REMOTES (từ capture Cobalt) =================
+local Remotes = RS:WaitForChild("RemoteEvents", 10)
+local EquipRE    = Remotes and Remotes:FindFirstChild("EquipItemHandle")
+local UnequipRE  = Remotes and Remotes:FindFirstChild("UnequipItemHandle")
+local DamageRF   = Remotes and Remotes:FindFirstChild("ToolDamageObject")
+local MapRE      = Remotes and Remotes:FindFirstChild("MapCellsDiscovered")
+local DragRE     = Remotes and Remotes:FindFirstChild("RequestStartDraggingItem")
+local StopDragRE = Remotes and Remotes:FindFirstChild("StopDraggingItem")
 
-    KillAura = false, KillAuraRadius = 40, KillAuraDelay = 0.08,
-    KillAuraTool = "Old Axe",
-
-    AutoChop = false,
-    AutoChopRadius = 200,
-    AutoChopDelay = 0.18,
-    AutoChopTool = "Old Axe",
-
-    FuelNames = { "Log","Stick","Wood","Branch","Coal","Fuel Canister","Charcoal","Plank","Timber","Firewood" },
-    MainFireName = "MainFire",
-    CampgroundName = "Campground",
-    FoliageFolderName = "Foliage",
-    MapFolderName = "Map",
-
-    ItemNames = { "Log","Stick","Stone","Rock","Berry","Berries","Wood","Branch","Mushroom","Flower","Fiber","Rope","Cloth","Meat","Hide","Pelt" },
-    AnimalNames = { "Wolf","Bear","Boar","Deer","Rabbit","Fox","Bunny","Animal","NPC","Enemy","Cultist" },
-    ChildNames = { "Lost Child","Lost Child2","Lost Child3","Lost Child4" },
-    ChestNames = { "Item Chest","Item Chest2","Item Chest3","Item Chest4","Item Chest6","Common Chest","Good Chest","Iron Chest","Gold Chest","Ruby Chest" },
+-- ================= CONFIG =================
+local CFG = {
+    Speed = false, WalkSpeed = 40,
+    Jump = false, JumpPower = 90,
+    Fly = false, FlySpeed = 60,
+    KillAura = false, KillRadius = 40,
+    AutoChop = false, ChopRadius = 120,
+    AutoDrop = false,
+    ESPChild = false,
+    Fullbright = false,
+    Tool = "Old Axe",
+    Delay = 0.5,
 }
 
--- ============ HELPERS ============
-local function nameMatches(objName, list)
-    local n = string.lower(objName)
-    for _, needle in ipairs(list) do
-        if string.find(n, string.lower(needle), 1, true) then return true end
+local TOOL_SUFFIX = "11960515286" -- phần cuối debug ID của tool, lấy từ capture
+local CHILD_KEY = "Lost Child"
+local ANIMAL_KEYS = { "Wolf", "Bear", "Boar", "Deer", "Rabbit", "Fox", "Cultist" }
+local DROP_KEYS = { "Ladder", "Chair", "Head" }
+
+local cache = { animals = {}, trees = {}, children = {} }
+
+-- ================= HELPERS =================
+local function hasKey(name, keys)
+    local n = string.lower(name)
+    for _, k in ipairs(keys) do
+        if string.find(n, string.lower(k), 1, true) then return true end
     end
     return false
 end
 
-local function getRoot()
-    local char = LP.Character
-    return char and char:FindFirstChild("HumanoidRootPart")
+local function root()
+    local c = LP.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
 end
 
-local function getInventory() return LP:FindFirstChild("Inventory") end
-
-local function getTool(name)
-    local inv = getInventory(); if not inv then return nil end
-    return inv:FindFirstChild(name) or inv:FindFirstChildWhichIsA("Tool")
+local function hum()
+    local c = LP.Character
+    return c and c:FindFirstChildOfClass("Humanoid")
 end
 
-local function getDebugId(obj)
-    if not obj then return "" end
-    local ok, id = pcall(function() return obj:GetDebugId(2) end)
-    if ok and id and id ~= "" then return id end
-    local ok2, id2 = pcall(function() return obj:GetDebugId() end)
-    if ok2 and id2 then return id2 end
-    return ""
+local function partOf(m)
+    if not m then return nil end
+    if m:IsA("BasePart") then return m end
+    return m:FindFirstChildWhichIsA("BasePart", true)
 end
 
-local function getMap() return Workspace:FindFirstChild(CONFIG.MapFolderName) end
+local function getTool()
+    local inv = LP:FindFirstChild("Inventory")
+    local t = inv and inv:FindFirstChild(CFG.Tool)
+    if not t and LP.Character then t = LP.Character:FindFirstChild(CFG.Tool) end
+    return t
+end
 
-local function getMainFirePosition()
-    local map = getMap()
-    local camp = map and map:FindFirstChild(CONFIG.CampgroundName)
-    local fire = camp and camp:FindFirstChild(CONFIG.MainFireName, true)
-    if fire then
-        local part = fire:IsA("BasePart") and fire or fire:FindFirstChildWhichIsA("BasePart", true)
-        if part then return part.Position end
-    end
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj.Name == CONFIG.MainFireName or obj.Name == "Campfire" then
-            local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart", true)
-            if part then return part.Position end
+local function getFirePart()
+    local map = Workspace:FindFirstChild("Map")
+    local camp = map and map:FindFirstChild("Campground")
+    local fire = camp and camp:FindFirstChild("MainFire", true)
+    return fire and partOf(fire)
+end
+
+-- ================= QUÉT & COMBAT (làm mới liên tục) =================
+local MAX_PER_TICK = 3
+local skipUntil = {}   -- mục tiêu vừa đánh sẽ tạm bỏ qua để chuyển sang mục khác
+
+local function skipped(m)
+    return (skipUntil[m] or 0) > os.clock()
+end
+local function setSkip(m, sec)
+    skipUntil[m] = os.clock() + sec
+end
+
+-- Trẻ: cập nhật mỗi 1 giây (dùng cho ESP và danh sách trẻ)
+local function scanChildren()
+    local out = {}
+    for _, o in ipairs(Workspace:GetDescendants()) do
+        if o:IsA("Model") and string.find(o.Name, CHILD_KEY, 1, true) then
+            table.insert(out, o)
         end
     end
-    return nil
+    cache.children = out
 end
 
--- ============ TP NGUYÊN LIỆU LÊN LỬA TRẠI ============
-local function tpItemToPosition(item, targetPos)
-    if not item or not item:IsA("Model") then return false end
-    local basePart = item:FindFirstChildWhichIsA("BasePart", true)
-    if not basePart then return false end
-    if not item.PrimaryPart then item.PrimaryPart = basePart end
-    local startDrag = RemoteEvents:FindFirstChild("RequestStartDraggingItem")
-    local stopDrag = RemoteEvents:FindFirstChild("StopDraggingItem")
-    if not startDrag or not stopDrag then return false end
-    pcall(function()
-        startDrag:FireServer(item)
-        item:SetPrimaryPartCFrame(CFrame.new(targetPos + Vector3.new(0, 3, 0)))
-        stopDrag:FireServer(item)
-    end)
-    return true
-end
-
-local function teleportFuelToCampfire()
-    local pos = getMainFirePosition()
-    if not pos then warn("[ollie] Không tìm thấy lửa trại"); return end
-    local count = 0
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if (obj:IsA("Model") or obj:IsA("BasePart")) and nameMatches(obj.Name, CONFIG.FuelNames) then
-            if tpItemToPosition(obj, pos) then count = count + 1 end
-            task.wait(0.05)
-        end
-    end
-    print(("[ollie] TP %d nguyên liệu lên lửa trại"):format(count))
-end
-
--- ============ REVEAL MAP ============
-local function revealMap()
-    local ev = RemoteEvents:FindFirstChild("MapCellsDiscovered")
-    if not ev then warn("[ollie] Không có MapCellsDiscovered"); return end
-    local cells = {}
-    for row = 1, 64 do
-        for col = 1, 64 do
-            table.insert(cells, { Row = row, Col = col })
-        end
-    end
-    for i = 1, #cells, 200 do
-        local batch = {}
-        for j = i, math.min(i + 199, #cells) do
-            table.insert(batch, cells[j])
-        end
-        pcall(function() ev:FireServer(batch, {}) end)
-        task.wait(0.1)
-    end
-    print("[ollie] Reveal map đã gửi")
-end
-
--- ============ ESP CORE ============
-local espCache = {}
-
-local function addESP(instance, color, label)
-    if not instance or not instance.Parent or espCache[instance] then return end
-    local adornee = instance:IsA("Model")
-        and (instance.PrimaryPart or instance:FindFirstChildWhichIsA("BasePart", true))
-        or instance
-    if not adornee or not adornee:IsA("BasePart") then return end
-    local hl = Instance.new("Highlight"); hl.Name = "ollie_esp_hl"; hl.Adornee = instance
-    hl.FillColor = color; hl.OutlineColor = color
-    hl.FillTransparency = 0.7; hl.OutlineTransparency = 0; hl.Parent = instance
-    local bb = Instance.new("BillboardGui"); bb.Name = "ollie_esp_label"; bb.Adornee = adornee
-    bb.Size = UDim2.new(0, 220, 0, 50); bb.StudsOffset = Vector3.new(0, 3, 0)
-    bb.AlwaysOnTop = true; bb.Parent = adornee
-    local txt = Instance.new("TextLabel"); txt.Size = UDim2.new(1, 0, 1, 0)
-    txt.BackgroundTransparency = 1; txt.Text = label; txt.TextColor3 = color
-    txt.TextStrokeTransparency = 0; txt.TextScaled = true; txt.Parent = bb
-    espCache[instance] = { hl, bb }
-end
-local function destroyESP(instance)
-    local g = espCache[instance]; if not g then return end
-    for _, v in ipairs(g) do if v and v.Parent then v:Destroy() end end
-    espCache[instance] = nil
-end
-local function clearAllESP() for inst in pairs(espCache) do destroyESP(inst) end end
-local function cleanESP() for inst in pairs(espCache) do if not inst.Parent then destroyESP(inst) end end end
-
-local function scanESP()
-    if not CONFIG.ESP then return end
-    if CONFIG.ESPPlayers then
-        for _, plr in ipairs(Players:GetPlayers()) do
-            if plr ~= LP and plr.Character then
-                addESP(plr.Character, Color3.fromRGB(255, 80, 80), plr.Name)
+-- Quái/thú: mọi Model có máu, trừ người chơi và trẻ
+local function scanAnimals()
+    local out, ch = {}, LP.Character
+    for _, o in ipairs(Workspace:GetDescendants()) do
+        if o:IsA("Model") and o ~= ch
+            and not Players:GetPlayerFromCharacter(o)
+            and not string.find(o.Name, CHILD_KEY, 1, true) then
+            local h = o:FindFirstChildWhichIsA("Humanoid", true)
+            if h and h.Health > 0 and partOf(o) then
+                table.insert(out, o)
             end
         end
     end
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("Model") or obj:IsA("BasePart") then
-            if CONFIG.ESPItems and nameMatches(obj.Name, CONFIG.ItemNames) then
-                addESP(obj, Color3.fromRGB(80, 255, 120), obj.Name)
-            end
-            if CONFIG.ESPAnimals and nameMatches(obj.Name, CONFIG.AnimalNames) then
-                addESP(obj, Color3.fromRGB(255, 180, 60), obj.Name)
+    return out
+end
+
+task.spawn(function()
+    while true do
+        pcall(scanChildren)
+        task.wait(1)
+    end
+end)
+
+-- Counter debug ID (reset khi đổi map / spawn lại)
+local hitCounter = 0
+local function resetCounter() hitCounter = 0 end
+Workspace.ChildAdded:Connect(function(c) if c.Name == "Map" then resetCounter() end end)
+Workspace.ChildRemoved:Connect(function(c) if c.Name == "Map" then resetCounter() end end)
+LP.CharacterAdded:Connect(resetCounter)
+
+local function nextDebugId()
+    hitCounter = hitCounter + 1
+    return hitCounter .. "_" .. TOOL_SUFFIX
+end
+
+local function swing(tool, target, p)
+    if not (EquipRE and UnequipRE and DamageRF) then return end
+    pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
+    task.wait(0.05)
+    pcall(DamageRF.InvokeServer, DamageRF, target, tool, nextDebugId(), CFrame.new(p.Position), false)
+    task.wait(0.03)
+    pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
+end
+
+-- Gom mục tiêu hiện có (quét lại mỗi lượt, không dùng cache cũ)
+local function collectTargets(r)
+    local list = {}
+
+    if CFG.KillAura then
+        for _, m in ipairs(scanAnimals()) do
+            local p = partOf(m)
+            if p and not skipped(m) then
+                local d = (p.Position - r.Position).Magnitude
+                if d <= CFG.KillRadius then
+                    table.insert(list, { m = m, p = p, d = d, kind = "animal" })
+                end
             end
         end
     end
-end
 
--- ============ AUTO COLLECT ============
-local function firePrompt(prompt)
-    if not prompt or not prompt.Parent or not prompt.Enabled then return false end
-    if type(fireproximityprompt) == "function" then pcall(fireproximityprompt, prompt); return true end
-    return pcall(function()
-        prompt:InputHoldBegin()
-        if prompt.HoldDuration > 0 then task.wait(prompt.HoldDuration) end
-        prompt:InputHoldEnd()
-    end)
-end
-
-local function autoCollectLoop()
-    while task.wait(0.25) do
-        if not CONFIG.AutoCollect then continue end
-        local root = getRoot(); if not root then continue end
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("ProximityPrompt") and obj.Enabled then
-                local parent = obj.Parent
-                if parent then
-                    local valid = CONFIG.CollectAllPrompts or nameMatches(parent.Name, CONFIG.ItemNames)
-                    if not valid and parent.Parent then valid = nameMatches(parent.Parent.Name, CONFIG.ItemNames) end
-                    if valid then
-                        local part = parent:IsA("BasePart") and parent or parent:FindFirstChildWhichIsA("BasePart", true)
-                        if part and (part.Position - root.Position).Magnitude <= CONFIG.CollectRadius then
-                            firePrompt(obj)
-                        end
+    if CFG.AutoChop then
+        local map = Workspace:FindFirstChild("Map")
+        local foliage = map and map:FindFirstChild("Foliage")
+        if foliage then
+            for _, t in ipairs(foliage:GetChildren()) do
+                local p = partOf(t)
+                if p and not skipped(t) then
+                    local d = (p.Position - r.Position).Magnitude
+                    if d <= CFG.ChopRadius then
+                        table.insert(list, { m = t, p = p, d = d, kind = "tree" })
                     end
                 end
             end
         end
     end
+
+    table.sort(list, function(a, b) return a.d < b.d end)
+    return list
 end
 
--- ============ KILL AURA (REAL REMOTES) ============
-local function killAuraLoop()
-    while task.wait(CONFIG.KillAuraDelay) do
-        if not CONFIG.KillAura then continue end
-        local char = LP.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        if not root then continue end
+task.spawn(function()
+    while true do
+        task.wait(CFG.Delay)
+        if not (CFG.KillAura or CFG.AutoChop) then continue end
 
-        local equip = RemoteEvents:FindFirstChild("EquipItemHandle")
-        local unequip = RemoteEvents:FindFirstChild("UnequipItemHandle")
-        local dmg = RemoteEvents:FindFirstChild("ToolDamageObject")
-        if not equip or not unequip or not dmg then continue end
+        local r, tool = root(), getTool()
+        if not (r and tool) then continue end
 
-        local tool = getTool(CONFIG.KillAuraTool)
-        if not tool then continue end
-        local handle = tool:FindFirstChild("Handle")
-        local debugId = handle and getDebugId(handle) or ""
+        local list = collectTargets(r)
+        for i = 1, math.min(#list, MAX_PER_TICK) do
+            local t = list[i]
+            swing(tool, t.m, t.p)
+            -- Cây: nghỉ 3 giây rồi mới đánh lại. Quái: nghỉ ngắn, chết thì tự bị lọc
+            setSkip(t.m, t.kind == "tree" and 3 or 0.6)
+        end
+    end
+end)
 
-        pcall(function() equip:FireServer("FireAllClients", tool) end)
+-- ================= MOVEMENT =================
+RunService.Heartbeat:Connect(function()
+    local h = hum()
+    if not h then return end
+    if CFG.Speed and h.WalkSpeed ~= CFG.WalkSpeed then h.WalkSpeed = CFG.WalkSpeed end
+    if CFG.Jump then
+        h.UseJumpPower = true
+        if h.JumpPower ~= CFG.JumpPower then h.JumpPower = CFG.JumpPower end
+    end
+end)
 
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj ~= char and (obj:IsA("Model") or obj:IsA("BasePart"))
-                and nameMatches(obj.Name, CONFIG.AnimalNames) then
-                local part = obj:IsA("BasePart") and obj
-                    or obj:FindFirstChildWhichIsA("BasePart", true)
-                if part and (part.Position - root.Position).Magnitude <= CONFIG.KillAuraRadius then
-                    pcall(function()
-                        dmg:InvokeServer(obj, tool, debugId, CFrame.new(part.Position))
-                    end)
+-- ================= FLY (PC + mobile) =================
+local flyBV, flyBG, flyConn
+local padUp, padDown = false, false -- set bởi nút ▲ ▼ trên mobile
+
+local function stopFly()
+    if flyConn then flyConn:Disconnect(); flyConn = nil end
+    if flyBV then flyBV:Destroy(); flyBV = nil end
+    if flyBG then flyBG:Destroy(); flyBG = nil end
+    local h = hum()
+    if h then h.PlatformStand = false end
+end
+
+local function startFly()
+    stopFly()
+    local r, h = root(), hum()
+    if not (r and h) then return end
+
+    h.PlatformStand = true
+
+    flyBV = Instance.new("BodyVelocity")
+    flyBV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    flyBV.Velocity = Vector3.zero
+    flyBV.Parent = r
+
+    flyBG = Instance.new("BodyGyro")
+    flyBG.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    flyBG.P = 1e4
+    flyBG.Parent = r
+
+    flyConn = RunService.Heartbeat:Connect(function()
+        local cam = Workspace.CurrentCamera
+        local rr, hh = root(), hum()
+        if not (cam and rr and hh and flyBV and flyBV.Parent) then return end
+
+        local md = hh.MoveDirection -- joystick ảo (mobile) và WASD (PC) đều ra vector này
+        local vy = 0
+        if UIS:IsKeyDown(Enum.KeyCode.Space) or padUp then vy = vy + 1 end
+        if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or padDown then vy = vy - 1 end
+
+        flyBV.Velocity = Vector3.new(md.X * CFG.FlySpeed, vy * CFG.FlySpeed, md.Z * CFG.FlySpeed)
+
+        local look = cam.CFrame.LookVector
+        flyBG.CFrame = CFrame.new(rr.Position, rr.Position + Vector3.new(look.X, 0, look.Z))
+    end)
+end
+
+LP.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    if CFG.Fly then startFly() end
+    if CFG.Speed or CFG.Jump then return end
+end)
+
+-- ================= ESP TRẺ =================
+local espTag = {}
+
+local function clearESPChild()
+    for _, hl in pairs(espTag) do if hl then hl:Destroy() end end
+    espTag = {}
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if CFG.ESPChild then
+            for m in pairs(espTag) do
+                if not m.Parent then espTag[m] = nil end
+            end
+            for _, m in ipairs(cache.children) do
+                if m.Parent and not espTag[m] then
+                    local hl = Instance.new("Highlight")
+                    hl.FillColor = Color3.fromRGB(255, 220, 80)
+                    hl.OutlineColor = Color3.fromRGB(255, 220, 80)
+                    hl.FillTransparency = 0.6
+                    hl.Adornee = m
+                    hl.Parent = m
+                    espTag[m] = hl
                 end
             end
         end
-
-        pcall(function() unequip:FireServer("FireAllClients", tool) end)
     end
-end
-
--- ============ AUTO CHOP TREE ============
-local function findNearestTree(root)
-    local map = getMap()
-    local foliage = map and map:FindFirstChild(CONFIG.FoliageFolderName)
-    if not foliage or not root then return nil end
-    local nearest, nearestDist
-    for _, child in ipairs(foliage:GetChildren()) do
-        local part = child:IsA("BasePart") and child
-            or (child:IsA("Model") and (child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart", true)))
-        if part then
-            local d = (part.Position - root.Position).Magnitude
-            if d <= CONFIG.AutoChopRadius and (not nearestDist or d < nearestDist) then
-                nearest = { inst = child, part = part }
-                nearestDist = d
-            end
-        end
-    end
-    return nearest
-end
-
-local function autoChopLoop()
-    while task.wait(CONFIG.AutoChopDelay) do
-        if not CONFIG.AutoChop then continue end
-        local char = LP.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        if not root then continue end
-
-        local equip = RemoteEvents:FindFirstChild("EquipItemHandle")
-        local unequip = RemoteEvents:FindFirstChild("UnequipItemHandle")
-        local dmg = RemoteEvents:FindFirstChild("ToolDamageObject")
-        if not equip or not unequip or not dmg then continue end
-
-        local axe = getTool(CONFIG.AutoChopTool)
-        if not axe then continue end
-        local handle = axe:FindFirstChild("Handle")
-        local debugId = handle and getDebugId(handle) or ""
-
-        local tree = findNearestTree(root)
-        if not tree then continue end
-
-        pcall(function() equip:FireServer("FireAllClients", axe) end)
-        task.wait(0.05)
-        pcall(function()
-            dmg:InvokeServer(tree.inst, axe, debugId, CFrame.new(tree.part.Position))
-        end)
-        task.wait(0.03)
-        pcall(function() unequip:FireServer("FireAllClients", axe) end)
-    end
-end
-
--- ============ SPEED / FLY / FULLBRIGHT / GODMODE ============
-RunService.Heartbeat:Connect(function()
-    if not CONFIG.Speed then return end
-    local char = LP.Character; local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if hum then hum.WalkSpeed = CONFIG.WalkSpeed; hum.JumpPower = CONFIG.JumpPower; hum.UseJumpPower = true end
 end)
 
-local flyBV, flyBG
-local function stopFly() if flyBV then flyBV:Destroy(); flyBV=nil end; if flyBG then flyBG:Destroy(); flyBG=nil end end
-local function startFly()
-    local root = getRoot(); if not root then return end; stopFly()
-    flyBV = Instance.new("BodyVelocity"); flyBV.MaxForce = Vector3.new(1e5,1e5,1e5); flyBV.Velocity = Vector3.zero; flyBV.Parent = root
-    flyBG = Instance.new("BodyGyro"); flyBG.MaxTorque = Vector3.new(1e5,1e5,1e5); flyBG.P = 1000; flyBG.D = 50; flyBG.Parent = root
-    task.spawn(function()
-        while CONFIG.Fly and flyBV and flyBV.Parent do
-            local cam = Workspace.CurrentCamera; local move = Vector3.zero
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then move += cam.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then move -= cam.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then move -= cam.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then move += cam.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.yAxis end
-            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.yAxis end
-            flyBV.Velocity = move.Magnitude > 0 and move.Unit * CONFIG.FlySpeed or Vector3.zero
-            flyBG.CFrame = cam.CFrame; task.wait()
-        end; stopFly()
-    end)
-end
-
-local fullbrightPrev = nil
+-- ================= FULLBRIGHT =================
+local fbPrev
 local function setFullbright(on)
     if on then
-        if not fullbrightPrev then
-            fullbrightPrev = {Brightness=Lighting.Brightness, ClockTime=Lighting.ClockTime, FogEnd=Lighting.FogEnd, Ambient=Lighting.Ambient}
-        end
-        Lighting.Brightness = 3; Lighting.ClockTime = 12; Lighting.FogEnd = 1e6; Lighting.Ambient = Color3.fromRGB(180,180,180)
-    elseif fullbrightPrev then
-        Lighting.Brightness = fullbrightPrev.Brightness
-        Lighting.ClockTime = fullbrightPrev.ClockTime
-        Lighting.FogEnd = fullbrightPrev.FogEnd
-        Lighting.Ambient = fullbrightPrev.Ambient
-        fullbrightPrev = nil
+        fbPrev = fbPrev or { B = Lighting.Brightness, C = Lighting.ClockTime, F = Lighting.FogEnd }
+        Lighting.Brightness = 3
+        Lighting.ClockTime = 12
+        Lighting.FogEnd = 1e6
+    elseif fbPrev then
+        Lighting.Brightness = fbPrev.B
+        Lighting.ClockTime = fbPrev.C
+        Lighting.FogEnd = fbPrev.F
+        fbPrev = nil
     end
 end
 
-local godConn, godOriginalMaxHealth
-local function applyGodmode(char)
-    local hum = char and char:FindFirstChildOfClass("Humanoid"); if not hum then return end
-    if not godOriginalMaxHealth then godOriginalMaxHealth = hum.MaxHealth end
-    hum.MaxHealth = math.huge; hum.Health = math.huge; hum.BreakJointsOnDeath = false
-    if godConn then godConn:Disconnect() end
-    godConn = hum.HealthChanged:Connect(function(hp)
-        if CONFIG.Godmode and hp < hum.MaxHealth then hum.Health = hum.MaxHealth end
+-- ================= TP =================
+local function tpTo(m)
+    local r, p = root(), partOf(m)
+    if r and p then r.CFrame = CFrame.new(p.Position + Vector3.new(0, 4, 0)) end
+end
+
+local function tpCampfire()
+    local fp = getFirePart()
+    local r = root()
+    if fp and r then r.CFrame = CFrame.new(fp.Position + Vector3.new(0, 4, 0)) end
+end
+
+-- ================= REVEAL MAP =================
+local function revealMap()
+    if not MapRE then warn("[ollie] Thiếu MapCellsDiscovered"); return end
+    local cells = {}
+    for r = 1, 64 do
+        for c = 1, 64 do table.insert(cells, { Row = r, Col = c }) end
+    end
+    for i = 1, #cells, 200 do
+        local b = {}
+        for j = i, math.min(i + 199, #cells) do table.insert(b, cells[j]) end
+        pcall(MapRE.FireServer, MapRE, b, {})
+        task.wait(0.1)
+    end
+    print("[ollie] Reveal map đã gửi")
+end
+
+-- ================= DỒN THANG/GHẾ/ĐẦU VỀ LỬA TRẠI =================
+local droppedAt = {}  -- tránh kéo lại cùng một món liên tục
+
+local function dropOnce()
+    local fp = getFirePart()
+    if not (fp and DragRE and StopDragRE) then return 0 end
+
+    local ch = LP.Character
+    local count = 0
+
+    for _, o in ipairs(Workspace:GetDescendants()) do
+        if count >= 10 then break end
+        if o:IsA("Model") and hasKey(o.Name, DROP_KEYS)
+            and (droppedAt[o] or 0) + 30 < os.clock() then
+            if ch and o:IsDescendantOf(ch) then continue end
+            if Players:GetPlayerFromCharacter(o) then continue end
+
+            if not o.PrimaryPart then pcall(function() o.PrimaryPart = partOf(o) end) end
+            if not o.PrimaryPart then continue end
+
+            droppedAt[o] = os.clock()
+            local offset = Vector3.new(math.random(-30, 30) / 10, 8 + count * 0.4, math.random(-30, 30) / 10)
+            local target = fp.Position + offset
+
+            pcall(DragRE.FireServer, DragRE, o)
+            pcall(function() o:SetPrimaryPartCFrame(CFrame.new(target)) end)
+            task.wait(0.05)
+            pcall(StopDragRE.FireServer, StopDragRE, o)
+
+            count = count + 1
+            task.wait(0.1)
+        end
+    end
+    return count
+end
+
+-- Tự động dồn: quét lại mỗi 3 giây khi bật
+task.spawn(function()
+    while true do
+        task.wait(3)
+        if CFG.AutoDrop then pcall(dropOnce) end
+    end
+end)
+
+-- ================= GUI =================
+local old = PlayerGui:FindFirstChild("ollie_v4")
+if old then old:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "ollie_v4"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = PlayerGui
+
+local C_BG  = Color3.fromRGB(16, 17, 23)
+local C_HDR = Color3.fromRGB(22, 24, 32)
+local C_ROW = Color3.fromRGB(26, 28, 38)
+local C_ON  = Color3.fromRGB(80, 195, 120)
+local C_OFF = Color3.fromRGB(55, 58, 72)
+local C_TXT = Color3.fromRGB(220, 222, 232)
+local C_ACC = Color3.fromRGB(110, 225, 165)
+local C_SUB = Color3.fromRGB(150, 150, 165)
+
+local function corner(p, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r or 8)
+    c.Parent = p
+    return c
+end
+
+-- Kéo được bằng chuột và cảm ứng
+local function makeDraggable(handle, target)
+    local dragging, startInput, startPos
+    handle.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            startInput = i.Position
+            startPos = target.Position
+        end
+    end)
+    handle.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if not dragging then return end
+        if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
+            local d = i.Position - startInput
+            target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
     end)
 end
-local function removeGodmode(char)
-    if godConn then godConn:Disconnect(); godConn = nil end
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if hum then hum.MaxHealth = godOriginalMaxHealth or 100; hum.Health = hum.MaxHealth; hum.BreakJointsOnDeath = true end
-    godOriginalMaxHealth = nil
+
+-- Nút thu nhỏ
+local fab = Instance.new("TextButton")
+fab.Size = UDim2.new(0, 46, 0, 46)
+fab.Position = UDim2.new(0, 12, 0.5, -23)
+fab.BackgroundColor3 = C_BG
+fab.Text = "99"
+fab.Font = Enum.Font.GothamBold
+fab.TextSize = 14
+fab.TextColor3 = C_ACC
+fab.Visible = false
+fab.Parent = gui
+corner(fab, 23)
+makeDraggable(fab, fab)
+
+-- Panel chính
+local W, H = 380, 300
+local panel = Instance.new("Frame")
+panel.Size = UDim2.new(0, W, 0, H)
+panel.Position = UDim2.new(0.5, -W / 2, 0.5, -H / 2)
+panel.BackgroundColor3 = C_BG
+panel.BorderSizePixel = 0
+panel.Parent = gui
+corner(panel, 10)
+
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 32)
+header.BackgroundColor3 = C_HDR
+header.BorderSizePixel = 0
+header.Parent = panel
+corner(header, 10)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -44, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "99 Nights · ollie"
+title.TextColor3 = C_ACC
+title.Font = Enum.Font.GothamBold
+title.TextSize = 13
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = header
+
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 26, 0, 26)
+minBtn.Position = UDim2.new(1, -30, 0, 3)
+minBtn.BackgroundColor3 = C_OFF
+minBtn.Text = "–"
+minBtn.TextColor3 = C_TXT
+minBtn.Font = Enum.Font.GothamBold
+minBtn.TextSize = 16
+minBtn.Parent = header
+corner(minBtn, 6)
+
+makeDraggable(header, panel)
+
+local body = Instance.new("Frame")
+body.Size = UDim2.new(1, -12, 1, -38)
+body.Position = UDim2.new(0, 6, 0, 36)
+body.BackgroundTransparency = 1
+body.Parent = panel
+
+-- Cột trái: toggle + nút
+local left = Instance.new("ScrollingFrame")
+left.Size = UDim2.new(0.5, -3, 1, 0)
+left.BackgroundTransparency = 1
+left.BorderSizePixel = 0
+left.ScrollBarThickness = 2
+left.ScrollBarImageColor3 = C_ACC
+left.AutomaticCanvasSize = Enum.AutomaticSize.Y
+left.CanvasSize = UDim2.new(0, 0, 0, 0)
+left.Parent = body
+local ll = Instance.new("UIListLayout")
+ll.Padding = UDim.new(0, 4)
+ll.Parent = left
+
+-- Cột phải: quét trẻ
+local right = Instance.new("Frame")
+right.Size = UDim2.new(0.5, -3, 1, 0)
+right.Position = UDim2.new(0.5, 3, 0, 0)
+right.BackgroundTransparency = 1
+right.Parent = body
+
+local rScan = Instance.new("TextButton")
+rScan.Size = UDim2.new(1, 0, 0, 26)
+rScan.BackgroundColor3 = C_ROW
+rScan.BorderSizePixel = 0
+rScan.Text = "🔍 Quét trẻ"
+rScan.TextColor3 = C_TXT
+rScan.Font = Enum.Font.GothamBold
+rScan.TextSize = 12
+rScan.Parent = right
+corner(rScan, 6)
+
+local childList = Instance.new("ScrollingFrame")
+childList.Size = UDim2.new(1, 0, 1, -30)
+childList.Position = UDim2.new(0, 0, 0, 30)
+childList.BackgroundTransparency = 1
+childList.BorderSizePixel = 0
+childList.ScrollBarThickness = 2
+childList.ScrollBarImageColor3 = C_ACC
+childList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+childList.CanvasSize = UDim2.new(0, 0, 0, 0)
+childList.Parent = right
+local cl = Instance.new("UIListLayout")
+cl.Padding = UDim.new(0, 4)
+cl.Parent = childList
+
+-- Nút ▲ ▼ cho Fly trên mobile (tạo trước để toggle Fly tham chiếu được)
+local flyPad = Instance.new("Frame")
+flyPad.Size = UDim2.new(0, 60, 0, 124)
+flyPad.Position = UDim2.new(1, -72, 1, -140)
+flyPad.BackgroundTransparency = 1
+flyPad.Visible = false
+flyPad.Parent = gui
+
+local function holdBtn(yOff, text, onState)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, 56, 0, 56)
+    b.Position = UDim2.new(0, 0, 0, yOff)
+    b.BackgroundColor3 = C_ROW
+    b.BorderSizePixel = 0
+    b.Text = text
+    b.TextColor3 = C_ACC
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 20
+    b.Parent = flyPad
+    corner(b, 28)
+    b.MouseButton1Down:Connect(function() onState(true) end)
+    b.MouseButton1Up:Connect(function() onState(false) end)
+    b.MouseLeave:Connect(function() onState(false) end)
 end
-local function setGodmode(on) if on then applyGodmode(LP.Character) else removeGodmode(LP.Character) end end
-LP.CharacterAdded:Connect(function(char) task.wait(0.5); if CONFIG.Godmode then applyGodmode(char) end end)
+holdBtn(0, "▲", function(v) padUp = v end)
+holdBtn(68, "▼", function(v) padDown = v end)
 
--- ============ TP NGƯỜI CHƠI ============
-local function tpTo(instance)
-    local root = getRoot(); if not root or not instance then return end
-    local part = instance:IsA("BasePart") and instance or instance:FindFirstChildWhichIsA("BasePart", true)
-    if part then root.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0)) end
+-- Toggle
+local function toggle(label, getV, setV)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -4, 0, 28)
+    row.BackgroundColor3 = C_ROW
+    row.BorderSizePixel = 0
+    row.Parent = left
+    corner(row, 6)
+
+    local lb = Instance.new("TextLabel")
+    lb.Size = UDim2.new(1, -50, 1, 0)
+    lb.Position = UDim2.new(0, 8, 0, 0)
+    lb.BackgroundTransparency = 1
+    lb.Text = label
+    lb.TextColor3 = C_TXT
+    lb.Font = Enum.Font.Gotham
+    lb.TextSize = 11
+    lb.TextXAlignment = Enum.TextXAlignment.Left
+    lb.Parent = row
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 38, 0, 18)
+    btn.Position = UDim2.new(1, -44, 0.5, -9)
+    btn.BorderSizePixel = 0
+    btn.Text = ""
+    btn.Parent = row
+    corner(btn, 9)
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.AnchorPoint = Vector2.new(0, 0.5)
+    knob.BackgroundColor3 = Color3.new(1, 1, 1)
+    knob.BorderSizePixel = 0
+    knob.Parent = btn
+    corner(knob, 7)
+
+    local function refresh(instant)
+        local on = getV()
+        btn.BackgroundColor3 = on and C_ON or C_OFF
+        local goal = { Position = on and UDim2.new(1, -16, 0.5, 0) or UDim2.new(0, 2, 0.5, 0) }
+        if instant then
+            knob.Position = goal.Position
+        else
+            TweenService:Create(knob, TweenInfo.new(0.12), goal):Play()
+        end
+    end
+    refresh(true)
+
+    btn.MouseButton1Click:Connect(function()
+        setV(not getV())
+        refresh()
+    end)
 end
-local function findFirstByName(names)
-    for _, obj in ipairs(Workspace:GetDescendants()) do if nameMatches(obj.Name, names) then return obj end end
-    return nil
+
+local function button(parent, text, cb)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -4, 0, 26)
+    b.BackgroundColor3 = C_ROW
+    b.BorderSizePixel = 0
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(190, 215, 255)
+    b.Font = Enum.Font.Gotham
+    b.TextSize = 11
+    b.Parent = parent
+    corner(b, 6)
+    b.MouseButton1Click:Connect(cb)
+    return b
 end
-local function tpCampfire()
-    local fire = Workspace:FindFirstChild("MainFire", true) or findFirstByName({"Campfire","Firepit"})
-    if fire then tpTo(fire) else warn("Không tìm thấy lửa trại") end
-end
-local function tpChild() local c = findFirstByName(CONFIG.ChildNames); if c then tpTo(c) else warn("Không tìm thấy trẻ") end end
-local function tpChest() local c = findFirstByName(CONFIG.ChestNames); if c then tpTo(c) else warn("Không tìm thấy rương") end end
 
--- ============ GUI ============
-local function makeGui()
-    local old = LP:WaitForChild("PlayerGui"):FindFirstChild("ollie_menu"); if old then old:Destroy() end
-    local gui = Instance.new("ScreenGui"); gui.Name = "ollie_menu"; gui.ResetOnSpawn = false
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling; gui.Parent = LP:WaitForChild("PlayerGui")
+toggle("Speed", function() return CFG.Speed end, function(v) CFG.Speed = v end)
+toggle("High Jump", function() return CFG.Jump end, function(v) CFG.Jump = v end)
+toggle("Fly", function() return CFG.Fly end, function(v)
+    CFG.Fly = v
+    flyPad.Visible = v
+    if v then startFly() else stopFly() end
+end)
+toggle("Kill Aura", function() return CFG.KillAura end, function(v) CFG.KillAura = v end)
+toggle("Auto Chop", function() return CFG.AutoChop end, function(v) CFG.AutoChop = v end)
+toggle("Auto dồn đồ", function() return CFG.AutoDrop end, function(v) CFG.AutoDrop = v end)
+toggle("ESP Trẻ", function() return CFG.ESPChild end, function(v)
+    CFG.ESPChild = v
+    if not v then clearESPChild() end
+end)
+toggle("Fullbright", function() return CFG.Fullbright end, function(v)
+    CFG.Fullbright = v
+    setFullbright(v)
+end)
 
-    local round = Instance.new("TextButton")
-    round.Size = UDim2.new(0,52,0,52); round.Position = UDim2.new(0,30,0.5,-26)
-    round.BackgroundColor3 = Color3.fromRGB(20,20,24); round.BorderSizePixel = 0
-    round.Text = "oll"; round.TextColor3 = Color3.fromRGB(120,255,170)
-    round.Font = Enum.Font.GothamBold; round.TextSize = 16
-    round.Visible = false; round.Parent = gui
-    Instance.new("UICorner", round).CornerRadius = UDim.new(1,0)
-    local rs = Instance.new("UIStroke", round); rs.Color = Color3.fromRGB(120,255,170); rs.Thickness = 1.5
+button(left, "🔥 TP Lửa trại", tpCampfire)
+button(left, "🪵 Dồn ngay", function()
+    task.spawn(function()
+        local n = dropOnce()
+        print("[ollie] Đã dồn " .. n .. " món về lửa trại")
+    end)
+end)
+button(left, "🗺️ Reveal map", function() task.spawn(revealMap) end)
 
-    local main = Instance.new("Frame")
-    main.Size = UDim2.new(0,560,0,440); main.Position = UDim2.new(0,30,0.5,-220)
-    main.BackgroundColor3 = Color3.fromRGB(16,16,20); main.BorderSizePixel = 0; main.Parent = gui
-    Instance.new("UICorner", main).CornerRadius = UDim.new(0,10)
-    local ms = Instance.new("UIStroke", main); ms.Color = Color3.fromRGB(60,60,70); ms.Thickness = 1
-
-    local header = Instance.new("Frame"); header.Size = UDim2.new(1,0,0,36)
-    header.BackgroundColor3 = Color3.fromRGB(24,24,30); header.BorderSizePixel = 0; header.Parent = main
-    Instance.new("UICorner", header).CornerRadius = UDim.new(0,10)
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1,-90,1,0); title.Position = UDim2.new(0,14,0,0)
-    title.BackgroundTransparency = 1; title.Text = "ollie — 99 nights"
-    title.TextColor3 = Color3.fromRGB(120,255,170); title.Font = Enum.Font.GothamBold
-    title.TextSize = 14; title.TextXAlignment = Enum.TextXAlignment.Left; title.Parent = header
-
-    local collapseBtn = Instance.new("TextButton")
-    collapseBtn.Size = UDim2.new(0,26,0,26); collapseBtn.Position = UDim2.new(1,-34,0.5,-13)
-    collapseBtn.BackgroundColor3 = Color3.fromRGB(40,40,48); collapseBtn.BorderSizePixel = 0
-    collapseBtn.Text = "–"; collapseBtn.TextColor3 = Color3.fromRGB(200,200,210)
-    collapseBtn.Font = Enum.Font.GothamBold; collapseBtn.TextSize = 16; collapseBtn.Parent = header
-    Instance.new("UICorner", collapseBtn).CornerRadius = UDim.new(1,0)
-
-    local body = Instance.new("Frame"); body.Size = UDim2.new(1,-20,1,-46)
-    body.Position = UDim2.new(0,10,0,42); body.BackgroundTransparency = 1; body.Parent = main
-    local leftCol = Instance.new("Frame"); leftCol.Size = UDim2.new(0.5,-6,1,0); leftCol.BackgroundTransparency = 1; leftCol.Parent = body
-    local rightCol = Instance.new("Frame"); rightCol.Size = UDim2.new(0.5,-6,1,0); rightCol.Position = UDim2.new(0.5,6,0,0); rightCol.BackgroundTransparency = 1; rightCol.Parent = body
-
-    local function makeSection(parent, txt, y)
-        local f = Instance.new("Frame"); f.Size = UDim2.new(1,0,0,24); f.Position = UDim2.new(0,0,0,y); f.BackgroundTransparency = 1; f.Parent = parent
-        local l = Instance.new("TextLabel"); l.Size = UDim2.new(1,0,1,0); l.BackgroundTransparency = 1
-        l.Text = txt; l.TextColor3 = Color3.fromRGB(120,255,170); l.Font = Enum.Font.GothamBold; l.TextSize = 12; l.TextXAlignment = Enum.TextXAlignment.Left; l.Parent = f
+-- Danh sách trẻ (quét khi bấm, sắp xếp gần → xa)
+local function populateChildren()
+    for _, c in ipairs(childList:GetChildren()) do
+        if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
     end
 
-    local function makeToggle(parent, text, init, getFn, setFn, y)
-        local row = Instance.new("Frame"); row.Size = UDim2.new(1,0,0,26); row.Position = UDim2.new(0,0,0,y)
-        row.BackgroundColor3 = Color3.fromRGB(24,24,30); row.BorderSizePixel = 0; row.Parent = parent
-        Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
-        local lbl = Instance.new("TextLabel"); lbl.Size = UDim2.new(1,-60,1,0); lbl.Position = UDim2.new(0,10,0,0)
-        lbl.BackgroundTransparency = 1; lbl.Text = text; lbl.TextColor3 = Color3.fromRGB(220,220,230)
-        lbl.Font = Enum.Font.Gotham; lbl.TextSize = 12; lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.Parent = row
-        local btn = Instance.new("TextButton"); btn.Size = UDim2.new(0,40,0,18); btn.Position = UDim2.new(1,-48,0.5,-9)
-        btn.BackgroundColor3 = init and Color3.fromRGB(80,200,120) or Color3.fromRGB(60,60,70); btn.BorderSizePixel = 0
-        btn.Text = init and "ON" or "OFF"; btn.TextColor3 = Color3.fromRGB(255,255,255)
-        btn.Font = Enum.Font.GothamBold; btn.TextSize = 11; btn.Parent = row
-        Instance.new("UICorner", btn).CornerRadius = UDim.new(0,4)
-        btn.MouseButton1Click:Connect(function()
-            local v = not getFn(); setFn(v)
-            btn.BackgroundColor3 = v and Color3.fromRGB(80,200,120) or Color3.fromRGB(60,60,70)
-            btn.Text = v and "ON" or "OFF"
-        end)
+    local r = root()
+    local list = {}
+    for _, m in ipairs(cache.children) do
+        local p = partOf(m)
+        if p then
+            local d = r and math.floor((p.Position - r.Position).Magnitude) or 0
+            table.insert(list, { m = m, d = d })
+        end
+    end
+    table.sort(list, function(a, b) return a.d < b.d end)
+
+    if #list == 0 then
+        local e = Instance.new("TextLabel")
+        e.Size = UDim2.new(1, -4, 0, 24)
+        e.BackgroundTransparency = 1
+        e.Text = "Không thấy trẻ nào"
+        e.TextColor3 = C_SUB
+        e.Font = Enum.Font.Gotham
+        e.TextSize = 11
+        e.Parent = childList
+        return
     end
 
-    local function makeButton(parent, text, onClick, y)
-        local b = Instance.new("TextButton"); b.Size = UDim2.new(1,0,0,24); b.Position = UDim2.new(0,0,0,y)
-        b.BackgroundColor3 = Color3.fromRGB(40,40,50); b.BorderSizePixel = 0; b.Text = text
-        b.TextColor3 = Color3.fromRGB(200,220,255); b.Font = Enum.Font.Gotham; b.TextSize = 12; b.Parent = parent
-        Instance.new("UICorner", b).CornerRadius = UDim.new(0,5); b.MouseButton1Click:Connect(onClick)
+    for i, item in ipairs(list) do
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, -4, 0, 26)
+        b.BackgroundColor3 = C_ROW
+        b.BorderSizePixel = 0
+        b.Text = string.format("%d. %s  (%dm)", i, item.m.Name, item.d)
+        b.TextColor3 = C_TXT
+        b.Font = Enum.Font.Gotham
+        b.TextSize = 11
+        b.TextXAlignment = Enum.TextXAlignment.Left
+        b.Parent = childList
+        corner(b, 6)
+        local pad = Instance.new("UIPadding")
+        pad.PaddingLeft = UDim.new(0, 6)
+        pad.Parent = b
+        b.MouseButton1Click:Connect(function() tpTo(item.m) end)
     end
-
-    -- LEFT COLUMN
-    makeSection(leftCol, "ESP / Collect", 0)
-    makeToggle(leftCol, "ESP master", CONFIG.ESP, function() return CONFIG.ESP end, function(v) CONFIG.ESP = v; if not v then clearAllESP() end end, 28)
-    makeToggle(leftCol, "ESP players", CONFIG.ESPPlayers, function() return CONFIG.ESPPlayers end, function(v) CONFIG.ESPPlayers = v end, 58)
-    makeToggle(leftCol, "ESP items", CONFIG.ESPItems, function() return CONFIG.ESPItems end, function(v) CONFIG.ESPItems = v end, 88)
-    makeToggle(leftCol, "ESP animals", CONFIG.ESPAnimals, function() return CONFIG.ESPAnimals end, function(v) CONFIG.ESPAnimals = v end, 118)
-    makeToggle(leftCol, "Auto collect", CONFIG.AutoCollect, function() return CONFIG.AutoCollect end, function(v) CONFIG.AutoCollect = v end, 148)
-    makeToggle(leftCol, "Collect all prompts", CONFIG.CollectAllPrompts, function() return CONFIG.CollectAllPrompts end, function(v) CONFIG.CollectAllPrompts = v end, 178)
-
-    -- RIGHT COLUMN
-    makeSection(rightCol, "Movement / Actions", 0)
-    makeToggle(rightCol, "Speed", CONFIG.Speed, function() return CONFIG.Speed end, function(v) CONFIG.Speed = v end, 28)
-    makeToggle(rightCol, "Fly", CONFIG.Fly, function() return CONFIG.Fly end, function(v) CONFIG.Fly = v; if v then startFly() else stopFly() end end, 58)
-    makeToggle(rightCol, "Fullbright", CONFIG.Fullbright, function() return CONFIG.Fullbright end, function(v) CONFIG.Fullbright = v; setFullbright(v) end, 88)
-    makeToggle(rightCol, "Godmode", CONFIG.Godmode, function() return CONFIG.Godmode end, function(v) CONFIG.Godmode = v; setGodmode(v) end, 118)
-    makeToggle(rightCol, "Kill aura (real)", CONFIG.KillAura, function() return CONFIG.KillAura end, function(v) CONFIG.KillAura = v end, 148)
-    makeToggle(rightCol, "Auto chop tree", CONFIG.AutoChop, function() return CONFIG.AutoChop end, function(v) CONFIG.AutoChop = v end, 178)
-
-    makeButton(rightCol, "TP về lửa trại", tpCampfire, 212)
-    makeButton(rightCol, "TP đến trẻ", tpChild, 240)
-    makeButton(rightCol, "TP đến rương", tpChest, 268)
-    makeButton(rightCol, "🔥 TP NGUYÊN LIỆU LÊN LỬA TRẠI", teleportFuelToCampfire, 296)
-    makeButton(rightCol, "🗺️ REVEAL MAP", revealMap, 324)
-
-    local function setCollapsed(c) main.Visible = not c; round.Visible = c end
-    collapseBtn.MouseButton1Click:Connect(function() setCollapsed(true) end)
-    round.MouseButton1Click:Connect(function() setCollapsed(false) end)
-
-    local function makeDraggable(handle, target)
-        local dragging, dragStart, startPos
-        handle.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                dragging = true; dragStart = input.Position; startPos = target.Position
-            end
-        end)
-        handle.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                dragging = false
-            end
-        end)
-        UserInputService.InputChanged:Connect(function(input)
-            if not dragging then return end
-            if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-                local d = input.Position - dragStart
-                target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
-            end
-        end)
-    end
-    makeDraggable(header, main); makeDraggable(round, round)
 end
+rScan.MouseButton1Click:Connect(populateChildren)
 
--- ============ START ============
-makeGui()
-task.spawn(function() while task.wait(CONFIG.ScanInterval) do cleanESP(); scanESP() end end)
-task.spawn(autoCollectLoop)
-task.spawn(killAuraLoop)
-task.spawn(autoChopLoop)
-print("[ollie] 99 Nights loaded — auto chop + kill aura real remote + reveal map")
+-- Thu nhỏ / mở lại
+minBtn.MouseButton1Click:Connect(function()
+    panel.Visible = false
+    fab.Visible = true
+end)
+fab.MouseButton1Click:Connect(function()
+    panel.Visible = true
+    fab.Visible = false
+end)
+
+print("[ollie] v4 loaded")
