@@ -18,6 +18,7 @@ local MapRE      = Remotes and Remotes:FindFirstChild("MapCellsDiscovered")
 local DragRE     = Remotes and Remotes:FindFirstChild("RequestStartDraggingItem")
 local StopDragRE = Remotes and Remotes:FindFirstChild("StopDraggingItem")
 local HitSoundRE = Remotes and Remotes:FindFirstChild("PlayEnemyHitSound")
+local PlantRE    = Remotes and Remotes:FindFirstChild("RequestPlantItem")
 
 local AXES = {
     "Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
@@ -364,12 +365,12 @@ function startFly()
     h.PlatformStand = true
 
     flyBV = Instance.new("BodyVelocity")
-    flyBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+    flyBV.MaxForce = Vector3.new(1e6,1e6,1e6)
     flyBV.Velocity = Vector3.zero
     flyBV.Parent   = r
 
     flyBG = Instance.new("BodyGyro")
-    flyBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
+    flyBG.MaxTorque = Vector3.new(1e6,1e6,1e6)
     flyBG.P = 1e4
     flyBG.Parent = r
 
@@ -461,8 +462,8 @@ task.spawn(function()
                     if adornPart then
                         bb = Instance.new("BillboardGui")
                         bb.Adornee     = adornPart
-                        bb.Size        = UDim2.new(0, 160, 0, 44)
-                        bb.StudsOffset = Vector3.new(0, 3, 0)
+                        bb.Size        = UDim2.new(0,160,0,44)
+                        bb.StudsOffset = Vector3.new(0,3,0)
                         bb.AlwaysOnTop = true
                         bb.Parent      = adornPart
 
@@ -515,7 +516,7 @@ local function pullPlayerToMe(plr)
     local r = root()
     local targetRoot = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
     if r and targetRoot then
-        targetRoot.CFrame = r.CFrame * CFrame.new(0, 1, -4)
+        targetRoot.CFrame = r.CFrame * CFrame.new(0,1,-4)
         return true
     end
     return false
@@ -544,8 +545,8 @@ local function pullAllExact(nameList)
 
     for i = 1, math.min(#found, 20) do
         if not (DragRE and StopDragRE) then break end
-        local o    = found[i].obj
-        local rr   = root(); if not rr then break end
+        local o  = found[i].obj
+        local rr = root(); if not rr then break end
 
         local spreadX = ((count % 3) - 1) * 1.4
         local liftY   = 1.2 + math.floor(count / 3) * 0.6
@@ -616,6 +617,102 @@ task.spawn(function()
         if CFG.AutoDrop then pcall(dumpFuelToFire) end
     end
 end)
+
+-- =================== TRỒNG CÂY ===================
+-- Mầm cây nằm trong nil instances, dùng getnilinstances()
+-- Cách dùng: đứng vào vị trí muốn trồng, bấm nút
+-- Script lấy tọa độ chân người chơi làm điểm trồng gốc
+-- Tất cả mầm cây khác được trồng chồng lên đó
+
+local plantStatusLabel -- gán sau khi GUI tạo
+
+local function getSaplings()
+    local out = {}
+    if not getnilinstances then return out end
+    local ok, nilList = pcall(getnilinstances)
+    if not ok or not nilList then return out end
+    for _, obj in ipairs(nilList) do
+        -- Kiểm tra an toàn vì nil instances có thể bị gc
+        local ok2, name = pcall(function() return obj.Name end)
+        if ok2 and name == "Sapling" then
+            table.insert(out, obj)
+        end
+    end
+    return out
+end
+
+local function plantAllSaplings(statusLbl)
+    local function setStatus(txt, col)
+        if statusLbl then
+            statusLbl.Text      = txt
+            statusLbl.TextColor3 = col or Color3.fromRGB(215,218,230)
+        end
+        print("[ollie] " .. txt)
+    end
+
+    if not PlantRE then
+        setStatus("❌ Không có remote RequestPlantItem", Color3.fromRGB(255,100,100))
+        return 0
+    end
+    if not getnilinstances then
+        setStatus("❌ Executor không hỗ trợ getnilinstances", Color3.fromRGB(255,100,100))
+        return 0
+    end
+
+    setStatus("🔍 Đang quét mầm cây...", Color3.fromRGB(255,220,80))
+    local saplings = getSaplings()
+
+    if #saplings == 0 then
+        setStatus("⚠️ Không tìm thấy mầm cây nào", Color3.fromRGB(255,180,60))
+        return 0
+    end
+
+    setStatus(string.format("🌱 Tìm thấy %d mầm — đang trồng...", #saplings), Color3.fromRGB(105,220,160))
+
+    local r = root()
+    if not r then
+        setStatus("❌ Không tìm thấy nhân vật", Color3.fromRGB(255,100,100))
+        return 0
+    end
+
+    -- Tọa độ trồng: ngay dưới chân người chơi
+    -- Y lùi xuống 3 để sát mặt đất
+    local basePos = r.CFrame.Position - Vector3.new(0, 3, 0)
+
+    local count = 0
+    for i, sapling in ipairs(saplings) do
+        -- Kiểm tra sapling còn hợp lệ
+        local ok, _ = pcall(function() return sapling.Name end)
+        if not ok then continue end
+
+        -- Offset nhỏ ±0.3 studs để không trùng hoàn toàn
+        -- nhưng vẫn trong cùng 1 ô trồng
+        local offset = Vector3.new(
+            math.random(-3, 3) / 10,
+            0,
+            math.random(-3, 3) / 10
+        )
+        local plantPos = basePos + offset
+
+        -- Trồng mầm vào tọa độ
+        local ok2 = pcall(PlantRE.InvokeServer, PlantRE, sapling, plantPos)
+
+        -- Dừng kéo để xác nhận thả
+        if StopDragRE then
+            pcall(StopDragRE.FireServer, StopDragRE, sapling)
+        end
+
+        if ok2 then count += 1 end
+        task.wait(0.15)
+    end
+
+    if count > 0 then
+        setStatus(string.format("✅ Đã trồng %d/%d mầm cây", count, #saplings), Color3.fromRGB(75,190,115))
+    else
+        setStatus("⚠️ Trồng thất bại — thử đứng sát đất hơn", Color3.fromRGB(255,180,60))
+    end
+    return count
+end
 
 -- =================== REVEAL MAP ===================
 local function revealMap()
@@ -746,7 +843,10 @@ local function makeDraggable(handle, target)
         if i.UserInputType == Enum.UserInputType.MouseMovement
         or i.UserInputType == Enum.UserInputType.Touch then
             local d = i.Position - si
-            target.Position = UDim2.new(sp.X.Scale, sp.X.Offset+d.X, sp.Y.Scale, sp.Y.Offset+d.Y)
+            target.Position = UDim2.new(
+                sp.X.Scale, sp.X.Offset + d.X,
+                sp.Y.Scale, sp.Y.Offset + d.Y
+            )
         end
     end)
 end
@@ -990,6 +1090,34 @@ button(t1, "🪵 Dồn nhiên liệu → Lửa trại ngay", function()
 end)
 button(t1, "🗺️ Reveal map", function() task.spawn(revealMap) end)
 
+-- Trồng cây — status label
+section(t1, "TRỒNG CÂY")
+
+local plantStatusRow = Instance.new("Frame")
+plantStatusRow.Size = UDim2.new(0.95,0,0,24)
+plantStatusRow.BackgroundColor3 = C_HDR
+plantStatusRow.BorderSizePixel = 0
+plantStatusRow.Parent = t1
+mkCorner(plantStatusRow, 5)
+
+local plantStatusLbl = Instance.new("TextLabel")
+plantStatusLbl.Size = UDim2.new(1,-8,1,0)
+plantStatusLbl.Position = UDim2.new(0,8,0,0)
+plantStatusLbl.BackgroundTransparency = 1
+plantStatusLbl.Text = "Đứng vào vị trí muốn trồng → bấm nút"
+plantStatusLbl.TextColor3 = C_SUB
+plantStatusLbl.Font = Enum.Font.Gotham
+plantStatusLbl.TextSize = 10
+plantStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+plantStatusLbl.TextTruncate = Enum.TextTruncate.AtEnd
+plantStatusLbl.Parent = plantStatusRow
+
+button(t1, "🌱 Trồng tất cả mầm cây (Sapling)", function()
+    task.spawn(function()
+        plantAllSaplings(plantStatusLbl)
+    end)
+end)
+
 -- ===== TAB 2: SLIDER =====
 local t2 = tabs[2]
 section(t2, "TỐC ĐỘ & NHẢY")
@@ -1009,17 +1137,17 @@ local t3 = tabs[3]
 local scanTop = Instance.new("Frame")
 scanTop.Size = UDim2.new(0.95,0,0,28); scanTop.BackgroundColor3 = C_HDR
 scanTop.BorderSizePixel = 0; scanTop.Parent = t3; mkCorner(scanTop, 6)
-local scanLbl = Instance.new("TextLabel")
-scanLbl.Size = UDim2.new(1,-40,1,0); scanLbl.Position = UDim2.new(0,8,0,0)
-scanLbl.BackgroundTransparency = 1; scanLbl.Text = "Danh sách trẻ em"
-scanLbl.TextColor3 = C_ACC; scanLbl.Font = Enum.Font.GothamBold
-scanLbl.TextSize = 11; scanLbl.TextXAlignment = Enum.TextXAlignment.Left
-scanLbl.Parent = scanTop
-local scanBtn = Instance.new("TextButton")
-scanBtn.Size = UDim2.new(0,30,0,20); scanBtn.Position = UDim2.new(1,-34,0.5,-10)
-scanBtn.BackgroundColor3 = C_ON; scanBtn.Text = "🔍"; scanBtn.TextSize = 11
-scanBtn.Font = Enum.Font.Gotham; scanBtn.BorderSizePixel = 0
-scanBtn.Parent = scanTop; mkCorner(scanBtn, 5)
+local scanLbl2 = Instance.new("TextLabel")
+scanLbl2.Size = UDim2.new(1,-40,1,0); scanLbl2.Position = UDim2.new(0,8,0,0)
+scanLbl2.BackgroundTransparency = 1; scanLbl2.Text = "Danh sách trẻ em"
+scanLbl2.TextColor3 = C_ACC; scanLbl2.Font = Enum.Font.GothamBold
+scanLbl2.TextSize = 11; scanLbl2.TextXAlignment = Enum.TextXAlignment.Left
+scanLbl2.Parent = scanTop
+local scanBtn2 = Instance.new("TextButton")
+scanBtn2.Size = UDim2.new(0,30,0,20); scanBtn2.Position = UDim2.new(1,-34,0.5,-10)
+scanBtn2.BackgroundColor3 = C_ON; scanBtn2.Text = "🔍"; scanBtn2.TextSize = 11
+scanBtn2.Font = Enum.Font.Gotham; scanBtn2.BorderSizePixel = 0
+scanBtn2.Parent = scanTop; mkCorner(scanBtn2, 5)
 
 local childContainer = Instance.new("Frame")
 childContainer.Size = UDim2.new(0.95,0,0,0)
@@ -1077,7 +1205,7 @@ local function populateChildren()
         tpBtn.MouseButton1Click:Connect(function() tpTo(item.m) end)
     end
 end
-scanBtn.MouseButton1Click:Connect(populateChildren)
+scanBtn2.MouseButton1Click:Connect(populateChildren)
 
 -- ===== TAB 4: TP & ĐỒ =====
 local t4 = tabs[4]
