@@ -19,6 +19,7 @@ local DragRE     = Remotes and Remotes:FindFirstChild("RequestStartDraggingItem"
 local StopDragRE = Remotes and Remotes:FindFirstChild("StopDraggingItem")
 local HitSoundRE = Remotes and Remotes:FindFirstChild("PlayEnemyHitSound")
 local PlantRE    = Remotes and Remotes:FindFirstChild("RequestPlantItem")
+local EatSoundRE = Remotes and Remotes:FindFirstChild("RequestReplicateSound")
 
 local AXES = {
     "Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
@@ -29,7 +30,6 @@ local MELEE_WEAPONS = {
     "Cultist King Mace","Brutal Battleaxe","Obsidiron Hammer",
     "Scythe","Vampire Scythe","Happy's Scythe",
 }
-
 local FOOD_ITEMS  = { "Berry","Carrot","Apple","Corn","Pumpkin","Chili" }
 local SCRAP_ITEMS = {
     "Log","Bolt","Sheet Metal","Broken Fan","Broken Radio",
@@ -41,13 +41,14 @@ local FUEL_EXACT = {
 }
 
 local CFG = {
-    Speed=false, WalkSpeed=40,
-    Jump=false,  JumpPower=90,
-    Fly=false,   FlySpeed=60,
+    Speed=false,     WalkSpeed=40,
+    Jump=false,      JumpPower=90,
+    Fly=false,       FlySpeed=60,
     Noclip=false,
-    KillAura=false, KillRadius=150,
-    AutoChop=false, ChopRadius=130,
+    KillAura=false,  KillRadius=150,
+    AutoChop=false,  ChopRadius=130,
     AutoDrop=false,
+    AutoEat=false,
     ESPChild=false,
     Fullbright=false,
     Delay=0.35,
@@ -56,6 +57,25 @@ local CFG = {
 local MAX_KILL_PER_CYCLE = 6
 local TOOL_SUFFIX = "11960515286"
 local CHILD_KEY   = "Lost Child"
+local GUI_NAME    = "ollie_v9"
+
+-- =================== XOÁ MENU CŨ (tính năng ẩn) ===================
+-- Chạy âm thầm khi load, xoá mọi menu trùng tên
+local function clearOldMenus()
+    for _, v in ipairs(PlayerGui:GetChildren()) do
+        if v:IsA("ScreenGui") and v.Name == GUI_NAME then
+            v:Destroy()
+        end
+    end
+    pcall(function()
+        for _, v in ipairs(game:GetService("CoreGui"):GetChildren()) do
+            if v:IsA("ScreenGui") and v.Name == GUI_NAME then
+                v:Destroy()
+            end
+        end
+    end)
+end
+clearOldMenus()
 
 -- =================== HELPERS ===================
 local function hasKey(name, keys)
@@ -131,6 +151,21 @@ local function getFirePart()
             local p = partOf(o); if p then return p end
         end
     end
+end
+
+-- Lấy nil instances theo tên
+local function getNilByName(name)
+    local out = {}
+    if not getnilinstances then return out end
+    local ok, nilList = pcall(getnilinstances)
+    if not ok or not nilList then return out end
+    for _, obj in ipairs(nilList) do
+        local ok2, n = pcall(function() return obj.Name end)
+        if ok2 and n == name then
+            table.insert(out, obj)
+        end
+    end
+    return out
 end
 
 -- =================== CACHE TRẺ ===================
@@ -426,6 +461,41 @@ local function setFullbright(on)
     end
 end
 
+-- =================== AUTO EAT CARROT ===================
+local function eatOne(carrot)
+    if not (DragRE and StopDragRE) then return false end
+    local char = LP.Character; if not char then return false end
+    local head = char:FindFirstChild("Head"); if not head then return false end
+
+    pcall(DragRE.FireServer,  DragRE, carrot)
+    task.wait(0.1)
+    pcall(StopDragRE.FireServer, StopDragRE, carrot)
+    task.wait(0.05)
+
+    if EatSoundRE then
+        pcall(EatSoundRE.FireServer, EatSoundRE,
+            "FireAllClients", "Eat",
+            { Instance = head, Volume = 0.15 }
+        )
+    end
+    return true
+end
+
+task.spawn(function()
+    while true do
+        task.wait(2)
+        if CFG.AutoEat then
+            local carrots = getNilByName("Carrot")
+            if #carrots > 0 then
+                local ok = pcall(eatOne, carrots[1])
+                if ok then
+                    print("[ollie] Đã ăn carrot (" .. #carrots .. " còn lại)")
+                end
+            end
+        end
+    end
+end)
+
 -- =================== ESP TRẺ ===================
 local espTag = {}
 local function clearESPChild()
@@ -572,7 +642,6 @@ local function pullAllExact(nameList)
         count += 1
         task.wait(0.08)
     end
-
     return count
 end
 
@@ -619,32 +688,10 @@ task.spawn(function()
 end)
 
 -- =================== TRỒNG CÂY ===================
--- Mầm cây nằm trong nil instances, dùng getnilinstances()
--- Cách dùng: đứng vào vị trí muốn trồng, bấm nút
--- Script lấy tọa độ chân người chơi làm điểm trồng gốc
--- Tất cả mầm cây khác được trồng chồng lên đó
-
-local plantStatusLabel -- gán sau khi GUI tạo
-
-local function getSaplings()
-    local out = {}
-    if not getnilinstances then return out end
-    local ok, nilList = pcall(getnilinstances)
-    if not ok or not nilList then return out end
-    for _, obj in ipairs(nilList) do
-        -- Kiểm tra an toàn vì nil instances có thể bị gc
-        local ok2, name = pcall(function() return obj.Name end)
-        if ok2 and name == "Sapling" then
-            table.insert(out, obj)
-        end
-    end
-    return out
-end
-
 local function plantAllSaplings(statusLbl)
     local function setStatus(txt, col)
         if statusLbl then
-            statusLbl.Text      = txt
+            statusLbl.Text       = txt
             statusLbl.TextColor3 = col or Color3.fromRGB(215,218,230)
         end
         print("[ollie] " .. txt)
@@ -660,7 +707,7 @@ local function plantAllSaplings(statusLbl)
     end
 
     setStatus("🔍 Đang quét mầm cây...", Color3.fromRGB(255,220,80))
-    local saplings = getSaplings()
+    local saplings = getNilByName("Sapling")
 
     if #saplings == 0 then
         setStatus("⚠️ Không tìm thấy mầm cây nào", Color3.fromRGB(255,180,60))
@@ -675,33 +722,23 @@ local function plantAllSaplings(statusLbl)
         return 0
     end
 
-    -- Tọa độ trồng: ngay dưới chân người chơi
-    -- Y lùi xuống 3 để sát mặt đất
     local basePos = r.CFrame.Position - Vector3.new(0, 3, 0)
-
     local count = 0
-    for i, sapling in ipairs(saplings) do
-        -- Kiểm tra sapling còn hợp lệ
-        local ok, _ = pcall(function() return sapling.Name end)
-        if not ok then continue end
 
-        -- Offset nhỏ ±0.3 studs để không trùng hoàn toàn
-        -- nhưng vẫn trong cùng 1 ô trồng
+    for _, sapling in ipairs(saplings) do
+        local ok0, _ = pcall(function() return sapling.Name end)
+        if not ok0 then continue end
+
         local offset = Vector3.new(
-            math.random(-3, 3) / 10,
-            0,
-            math.random(-3, 3) / 10
+            math.random(-3,3) / 10, 0,
+            math.random(-3,3) / 10
         )
         local plantPos = basePos + offset
 
-        -- Trồng mầm vào tọa độ
         local ok2 = pcall(PlantRE.InvokeServer, PlantRE, sapling, plantPos)
-
-        -- Dừng kéo để xác nhận thả
         if StopDragRE then
             pcall(StopDragRE.FireServer, StopDragRE, sapling)
         end
-
         if ok2 then count += 1 end
         task.wait(0.15)
     end
@@ -800,10 +837,8 @@ end
 local function setFixLag(v) if v then enableFixLag() else disableFixLag() end end
 
 -- =================== GUI ===================
-local old = PlayerGui:FindFirstChild("ollie_v9")
-if old then old:Destroy() end
 local gui = Instance.new("ScreenGui")
-gui.Name = "ollie_v9"; gui.ResetOnSpawn = false
+gui.Name = GUI_NAME; gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling; gui.Parent = PlayerGui
 
 local C_BG  = Color3.fromRGB(14,15,20)
@@ -851,14 +886,12 @@ local function makeDraggable(handle, target)
     end)
 end
 
--- FAB
 local fab = Instance.new("TextButton")
 fab.Size = UDim2.new(0,44,0,44); fab.Position = UDim2.new(0,10,0.5,-22)
 fab.BackgroundColor3 = C_HDR; fab.Text = "99"; fab.Font = Enum.Font.GothamBold
 fab.TextSize = 13; fab.TextColor3 = C_ACC; fab.Visible = false; fab.Parent = gui
 mkCorner(fab, 22); mkStroke(fab, C_ACC, 1.5); makeDraggable(fab, fab)
 
--- Panel
 local W, H = 460, 370
 local panel = Instance.new("Frame")
 panel.Size = UDim2.new(0,W,0,H); panel.Position = UDim2.new(0.5,-W/2,0.5,-H/2)
@@ -885,7 +918,6 @@ minBtn.Parent = header; mkCorner(minBtn, 6)
 minBtn.MouseButton1Click:Connect(function() panel.Visible = false; fab.Visible = true end)
 fab.MouseButton1Click:Connect(function() panel.Visible = true; fab.Visible = false end)
 
--- Tabs
 local TAB_NAMES = { "Chính","Slider","Trẻ em","TP & Đồ" }
 local tabs, tabBtns = {}, {}
 
@@ -924,7 +956,6 @@ for i, name in ipairs(TAB_NAMES) do
     tabBtns[i] = btn
 end
 
--- Widget helpers
 local function toggle(parent, label, getV, setV)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(0.95,0,0,28); row.BackgroundColor3 = C_ROW
@@ -1015,7 +1046,6 @@ local function slider(parent, label, minV, maxV, getV, setV)
     end)
 end
 
--- Nút ▲▼ Fly
 local flyPad = Instance.new("Frame")
 flyPad.Size = UDim2.new(0,60,0,124); flyPad.Position = UDim2.new(1,-70,1,-132)
 flyPad.BackgroundTransparency = 1; flyPad.Visible = false; flyPad.Parent = gui
@@ -1038,6 +1068,7 @@ holdBtn(68, "▼", function(v) padDown = v end)
 
 -- ===== TAB 1: CHÍNH =====
 local t1 = tabs[1]
+
 local wRow = Instance.new("Frame")
 wRow.Size = UDim2.new(0.95,0,0,24); wRow.BackgroundColor3 = C_HDR
 wRow.BorderSizePixel = 0; wRow.Parent = t1; mkCorner(wRow, 5)
@@ -1058,29 +1089,31 @@ section(t1, "PERFORMANCE")
 toggle(t1, "⚡ Fix Lag Pro", function() return FixLag end, function(v) setFixLag(v) end)
 
 section(t1, "MOVEMENT")
-toggle(t1, "Speed",        function() return CFG.Speed      end, function(v) CFG.Speed = v end)
-toggle(t1, "High Jump",    function() return CFG.Jump       end, function(v) CFG.Jump  = v end)
-toggle(t1, "Fly",          function() return CFG.Fly        end, function(v)
+toggle(t1, "Speed",      function() return CFG.Speed      end, function(v) CFG.Speed = v end)
+toggle(t1, "High Jump",  function() return CFG.Jump       end, function(v) CFG.Jump  = v end)
+toggle(t1, "Fly",        function() return CFG.Fly        end, function(v)
     CFG.Fly = v; flyPad.Visible = v
     if v then startFly() else stopFly() end
 end)
-toggle(t1, "👻 Noclip",    function() return CFG.Noclip     end, function(v)
+toggle(t1, "👻 Noclip",  function() return CFG.Noclip     end, function(v)
     CFG.Noclip = v; if not v then restoreNoclip() end
 end)
-toggle(t1, "Fullbright",   function() return CFG.Fullbright end, function(v)
+toggle(t1, "Fullbright", function() return CFG.Fullbright end, function(v)
     CFG.Fullbright = v; setFullbright(v)
 end)
 
 section(t1, "COMBAT")
-toggle(t1, "Kill Aura",    function() return CFG.KillAura   end, function(v) CFG.KillAura = v end)
-toggle(t1, "Auto Chop",    function() return CFG.AutoChop   end, function(v) CFG.AutoChop = v end)
+toggle(t1, "Kill Aura",  function() return CFG.KillAura   end, function(v) CFG.KillAura = v end)
+toggle(t1, "Auto Chop",  function() return CFG.AutoChop   end, function(v) CFG.AutoChop = v end)
 
 section(t1, "UTILITY")
-toggle(t1, "ESP Trẻ",      function() return CFG.ESPChild   end, function(v)
+toggle(t1, "ESP Trẻ",        function() return CFG.ESPChild end, function(v)
     CFG.ESPChild = v; if not v then clearESPChild() end
 end)
+toggle(t1, "🥕 Auto Eat Carrot", function() return CFG.AutoEat end, function(v) CFG.AutoEat = v end)
 toggle(t1, "Auto dồn nhiên liệu → Lửa trại",
     function() return CFG.AutoDrop end, function(v) CFG.AutoDrop = v end)
+
 button(t1, "🔥 TP Lửa trại", tpCampfire)
 button(t1, "🪵 Dồn nhiên liệu → Lửa trại ngay", function()
     task.spawn(function()
@@ -1090,32 +1123,25 @@ button(t1, "🪵 Dồn nhiên liệu → Lửa trại ngay", function()
 end)
 button(t1, "🗺️ Reveal map", function() task.spawn(revealMap) end)
 
--- Trồng cây — status label
 section(t1, "TRỒNG CÂY")
-
 local plantStatusRow = Instance.new("Frame")
 plantStatusRow.Size = UDim2.new(0.95,0,0,24)
 plantStatusRow.BackgroundColor3 = C_HDR
 plantStatusRow.BorderSizePixel = 0
-plantStatusRow.Parent = t1
-mkCorner(plantStatusRow, 5)
-
+plantStatusRow.Parent = t1; mkCorner(plantStatusRow, 5)
 local plantStatusLbl = Instance.new("TextLabel")
 plantStatusLbl.Size = UDim2.new(1,-8,1,0)
 plantStatusLbl.Position = UDim2.new(0,8,0,0)
 plantStatusLbl.BackgroundTransparency = 1
 plantStatusLbl.Text = "Đứng vào vị trí muốn trồng → bấm nút"
 plantStatusLbl.TextColor3 = C_SUB
-plantStatusLbl.Font = Enum.Font.Gotham
-plantStatusLbl.TextSize = 10
+plantStatusLbl.Font = Enum.Font.Gotham; plantStatusLbl.TextSize = 10
 plantStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
 plantStatusLbl.TextTruncate = Enum.TextTruncate.AtEnd
 plantStatusLbl.Parent = plantStatusRow
 
 button(t1, "🌱 Trồng tất cả mầm cây (Sapling)", function()
-    task.spawn(function()
-        plantAllSaplings(plantStatusLbl)
-    end)
+    task.spawn(function() plantAllSaplings(plantStatusLbl) end)
 end)
 
 -- ===== TAB 2: SLIDER =====
@@ -1137,17 +1163,17 @@ local t3 = tabs[3]
 local scanTop = Instance.new("Frame")
 scanTop.Size = UDim2.new(0.95,0,0,28); scanTop.BackgroundColor3 = C_HDR
 scanTop.BorderSizePixel = 0; scanTop.Parent = t3; mkCorner(scanTop, 6)
-local scanLbl2 = Instance.new("TextLabel")
-scanLbl2.Size = UDim2.new(1,-40,1,0); scanLbl2.Position = UDim2.new(0,8,0,0)
-scanLbl2.BackgroundTransparency = 1; scanLbl2.Text = "Danh sách trẻ em"
-scanLbl2.TextColor3 = C_ACC; scanLbl2.Font = Enum.Font.GothamBold
-scanLbl2.TextSize = 11; scanLbl2.TextXAlignment = Enum.TextXAlignment.Left
-scanLbl2.Parent = scanTop
-local scanBtn2 = Instance.new("TextButton")
-scanBtn2.Size = UDim2.new(0,30,0,20); scanBtn2.Position = UDim2.new(1,-34,0.5,-10)
-scanBtn2.BackgroundColor3 = C_ON; scanBtn2.Text = "🔍"; scanBtn2.TextSize = 11
-scanBtn2.Font = Enum.Font.Gotham; scanBtn2.BorderSizePixel = 0
-scanBtn2.Parent = scanTop; mkCorner(scanBtn2, 5)
+local scanLbl3 = Instance.new("TextLabel")
+scanLbl3.Size = UDim2.new(1,-40,1,0); scanLbl3.Position = UDim2.new(0,8,0,0)
+scanLbl3.BackgroundTransparency = 1; scanLbl3.Text = "Danh sách trẻ em"
+scanLbl3.TextColor3 = C_ACC; scanLbl3.Font = Enum.Font.GothamBold
+scanLbl3.TextSize = 11; scanLbl3.TextXAlignment = Enum.TextXAlignment.Left
+scanLbl3.Parent = scanTop
+local scanBtn3 = Instance.new("TextButton")
+scanBtn3.Size = UDim2.new(0,30,0,20); scanBtn3.Position = UDim2.new(1,-34,0.5,-10)
+scanBtn3.BackgroundColor3 = C_ON; scanBtn3.Text = "🔍"; scanBtn3.TextSize = 11
+scanBtn3.Font = Enum.Font.Gotham; scanBtn3.BorderSizePixel = 0
+scanBtn3.Parent = scanTop; mkCorner(scanBtn3, 5)
 
 local childContainer = Instance.new("Frame")
 childContainer.Size = UDim2.new(0.95,0,0,0)
@@ -1205,7 +1231,7 @@ local function populateChildren()
         tpBtn.MouseButton1Click:Connect(function() tpTo(item.m) end)
     end
 end
-scanBtn2.MouseButton1Click:Connect(populateChildren)
+scanBtn3.MouseButton1Click:Connect(populateChildren)
 
 -- ===== TAB 4: TP & ĐỒ =====
 local t4 = tabs[4]
