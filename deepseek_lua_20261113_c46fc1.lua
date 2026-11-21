@@ -422,6 +422,106 @@ task.spawn(function()
     end
 end)
 
+-- ===================== FIX LAG =====================
+local FixLag = false
+local LagBackup = {}
+local LagObjects = {}
+
+local function saveProperty(obj, prop)
+    if LagBackup[obj] == nil then
+        LagBackup[obj] = {}
+    end
+    if LagBackup[obj][prop] == nil then
+        pcall(function()
+            LagBackup[obj][prop] = obj[prop]
+        end)
+    end
+end
+
+local function optimizeObject(obj)
+    if not obj or not obj.Parent then return end
+
+    if obj:IsA("ParticleEmitter")
+    or obj:IsA("Trail")
+    or obj:IsA("Beam")
+    or obj:IsA("Smoke")
+    or obj:IsA("Fire")
+    or obj:IsA("Sparkles") then
+
+        saveProperty(obj, "Enabled")
+        pcall(function()
+            obj.Enabled = false
+        end)
+    end
+
+    if obj:IsA("BasePart") then
+        saveProperty(obj, "CastShadow")
+        pcall(function()
+            obj.CastShadow = false
+        end)
+    end
+end
+
+local function enableFixLag()
+    if FixLag then return end
+    FixLag = true
+
+    saveProperty(Lighting, "GlobalShadows")
+    Lighting.GlobalShadows = false
+
+    saveProperty(Lighting, "EnvironmentDiffuseScale")
+    Lighting.EnvironmentDiffuseScale = 0
+
+    saveProperty(Lighting, "EnvironmentSpecularScale")
+    Lighting.EnvironmentSpecularScale = 0
+
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        optimizeObject(obj)
+    end
+
+    -- Tối ưu cả vật thể mới xuất hiện
+    if not LagObjects.Connection then
+        LagObjects.Connection = Workspace.DescendantAdded:Connect(function(obj)
+            if FixLag then
+                task.defer(optimizeObject, obj)
+            end
+        end)
+    end
+
+    print("[ollie] Fix Lag ON")
+end
+
+local function disableFixLag()
+    if not FixLag then return end
+    FixLag = false
+
+    if LagObjects.Connection then
+        LagObjects.Connection:Disconnect()
+        LagObjects.Connection = nil
+    end
+
+    for obj, properties in pairs(LagBackup) do
+        if obj and obj.Parent then
+            for prop, value in pairs(properties) do
+                pcall(function()
+                    obj[prop] = value
+                end)
+            end
+        end
+    end
+
+    LagBackup = {}
+    print("[ollie] Fix Lag OFF")
+end
+
+local function setFixLag(value)
+    if value then
+        enableFixLag()
+    else
+        disableFixLag()
+    end
+end
+
 -- ===================== GUI =====================
 local old = PlayerGui:FindFirstChild("ollie_v7")
 if old then old:Destroy() end
