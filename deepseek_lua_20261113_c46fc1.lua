@@ -1,4 +1,4 @@
--- 99 Nights in the Forest — ollie v7 (solo map, PC + mobile)
+-- 99 Nights in the Forest — ollie v8 (solo map, PC + mobile)
 local Players    = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS        = game:GetService("UserInputService")
@@ -22,7 +22,6 @@ local HitSoundRE = Remotes and Remotes:FindFirstChild("PlayEnemyHitSound")
 local AXES = {
     "Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
 }
-
 local MELEE_WEAPONS = {
     "Spear","Honey Spear","Morningstar","Katana","Laser Sword","Ice Sword",
     "Trident","Poison Claws","Poison Spear","Infernal Sword",
@@ -30,43 +29,34 @@ local MELEE_WEAPONS = {
     "Scythe","Vampire Scythe","Happy's Scythe",
 }
 
-local FOOD_ITEMS = {
-    "Berry",
-    "Carrot",
-    "Apple",
-    "Corn",
-    "Pumpkin",
-    "Chili",
-}
-
+local FOOD_ITEMS  = { "Berry","Carrot","Apple","Corn","Pumpkin","Chili" }
 local SCRAP_ITEMS = {
-    "Bolt",
-    "Sheet Metal",
-    "Broken Fan",
-    "Broken Radio",
-    "Broken Microwave",
-    "Washing Machine",
-    "Tires & Engines",
+    "Log","Bolt","Sheet Metal","Broken Fan","Broken Radio",
+    "Broken Microwave","Washing Machine","Tires & Engines",
+}
+local FUEL_EXACT  = {
+    "Log","Chair","Biofuel","Coal",
+    "Purple Fur Tuft","Fuel Canister","Oil Barrel",
 }
 
 local CFG = {
-    Speed        = false, WalkSpeed   = 40,
-    Jump         = false, JumpPower   = 90,
-    Fly          = false, FlySpeed    = 60,
-    Noclip       = false,
-    KillAura     = false, KillRadius  = 150,
-    AutoChop     = false, ChopRadius  = 130,
-    AutoDrop     = false,
-    ESPChild     = false,
-    Fullbright   = false,
-    Delay        = 0.35,
+    Speed=false, WalkSpeed=40,
+    Jump=false,  JumpPower=90,
+    Fly=false,   FlySpeed=60,
+    Noclip=false,
+    KillAura=false, KillRadius=150,
+    AutoChop=false, ChopRadius=130,
+    AutoDrop=false,
+    ESPChild=false,
+    Fullbright=false,
+    Delay=0.35,
 }
 
 local MAX_KILL_PER_CYCLE = 6
 local TOOL_SUFFIX = "11960515286"
 local CHILD_KEY   = "Lost Child"
 
--- ===================== HELPERS =====================
+-- =================== HELPERS ===================
 local function hasKey(name, keys)
     local n = string.lower(name)
     for _, k in ipairs(keys) do
@@ -76,9 +66,7 @@ local function hasKey(name, keys)
 end
 
 local function matchesExact(name, list)
-    for _, itemName in ipairs(list) do
-        if name == itemName then return true end
-    end
+    for _, v in ipairs(list) do if name == v then return true end end
     return false
 end
 
@@ -93,50 +81,13 @@ end
 local function partOf(m)
     if not m then return nil end
     if m:IsA("BasePart") then return m end
-    if m:IsA("Model") and m.PrimaryPart then return m.PrimaryPart end
-    local hrp = m:FindFirstChild("HumanoidRootPart")
-    if hrp and hrp:IsA("BasePart") then return hrp end
-    return m:FindFirstChildWhichIsA("BasePart", true)
-end
-
-local function moveObjectToCFrame(obj, targetCF)
-    if not obj or not obj.Parent then return false end
-    if obj:IsA("BasePart") then
-        obj.CFrame = targetCF
-        return true
-    elseif obj:IsA("Model") then
-        if not obj.PrimaryPart then
-            local p = partOf(obj)
-            if p then pcall(function() obj.PrimaryPart = p end) end
-        end
-        if obj.PrimaryPart then
-            pcall(function() obj:SetPrimaryPartCFrame(targetCF) end)
-            return true
-        else
-            pcall(function() obj:PivotTo(targetCF) end)
-            return true
-        end
+    if m:IsA("Model") then
+        if m.PrimaryPart then return m.PrimaryPart end
+        local hrp = m:FindFirstChild("HumanoidRootPart")
+        if hrp then return hrp end
+        return m:FindFirstChildWhichIsA("BasePart", true)
     end
-    return false
-end
-
-local function bringToPlayer(obj, indexOffset)
-    local r = root()
-    if not r or not obj or not obj.Parent then return false end
-    local idx = indexOffset or 0
-    local spreadX = ((idx % 3) - 1) * 1.4
-    local liftY = 1.2 + math.floor(idx / 3) * 0.6
-    local goalCF = r.CFrame * CFrame.new(spreadX, liftY, -4)
-
-    if DragRE and StopDragRE then
-        pcall(DragRE.FireServer, DragRE, obj)
-        moveObjectToCFrame(obj, goalCF)
-        task.wait(0.04)
-        pcall(StopDragRE.FireServer, StopDragRE, obj)
-        return true
-    end
-
-    return moveObjectToCFrame(obj, goalCF)
+    return nil
 end
 
 local function findFromList(list, inv, char)
@@ -145,9 +96,7 @@ local function findFromList(list, inv, char)
             or (char and char:FindFirstChild(name))
         if t then return t end
     end
-    return nil
 end
-
 local function getFallbackTool(inv, char)
     if inv then
         local t = inv:FindFirstChildWhichIsA("Tool")
@@ -156,29 +105,19 @@ local function getFallbackTool(inv, char)
             if item:IsA("Model") then return item end
         end
     end
-    return char and char:FindFirstChild("Tool")
+    return char and char:FindFirstChildWhichIsA("Tool")
 end
-
--- Ưu tiên vũ khí không phải rìu cho Kill Aura; chỉ dùng rìu nếu không có vũ khí khác
 local function getKillTool()
-    local inv  = LP:FindFirstChild("Inventory")
-    local char = LP.Character
+    local inv, char = LP:FindFirstChild("Inventory"), LP.Character
     return findFromList(MELEE_WEAPONS, inv, char)
         or findFromList(AXES, inv, char)
         or getFallbackTool(inv, char)
 end
-
--- Ưu tiên rìu cho Auto Chop; fallback sang vũ khí/công cụ khác nếu không có rìu
 local function getChopTool()
-    local inv  = LP:FindFirstChild("Inventory")
-    local char = LP.Character
+    local inv, char = LP:FindFirstChild("Inventory"), LP.Character
     return findFromList(AXES, inv, char)
         or findFromList(MELEE_WEAPONS, inv, char)
         or getFallbackTool(inv, char)
-end
-
-local function getTool()
-    return getKillTool()
 end
 
 local function getFirePart()
@@ -193,7 +132,18 @@ local function getFirePart()
     end
 end
 
--- ===================== CACHE TRẺ =====================
+local function getCraftingTablePart()
+    for _, o in ipairs(Workspace:GetDescendants()) do
+        if o.Name == "Crafting Bench" then
+            local p = partOf(o)
+            if p then return p end
+        end
+    end
+    warn("[ollie] Không tìm thấy Crafting Bench")
+    return nil
+end
+
+-- =================== CACHE TRẺ ===================
 local childCache = {}
 task.spawn(function()
     while true do
@@ -208,7 +158,7 @@ task.spawn(function()
     end
 end)
 
--- ===================== COUNTER =====================
+-- =================== COUNTER ===================
 local hitCounter = 0
 local function resetCounter() hitCounter = 0 end
 Workspace.ChildAdded:Connect(function(c)   if c.Name=="Map" then resetCounter() end end)
@@ -219,7 +169,7 @@ LP.CharacterAdded:Connect(function()
 end)
 local function nextId() hitCounter+=1; return hitCounter.."_"..TOOL_SUFFIX end
 
--- ===================== SWING =====================
+-- =================== SWING ===================
 local function hitOnce(tool, target, p)
     if not DamageRF then return false end
     local ok = pcall(DamageRF.InvokeServer, DamageRF,
@@ -232,7 +182,7 @@ end
 
 local function swing(tool, target, p)
     if not (EquipRE and UnequipRE and DamageRF) then return false end
-    pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
+    pcall(EquipRE.FireServer,  EquipRE,  "FireAllClients", tool)
     task.wait(0.03)
     local ok = hitOnce(tool, target, p)
     task.wait(0.025)
@@ -241,7 +191,7 @@ local function swing(tool, target, p)
 end
 
 local function swingBatch(tool, targets)
-    if not (EquipRE and UnequipRE and DamageRF) or #targets == 0 then return end
+    if not (EquipRE and UnequipRE and DamageRF) or #targets==0 then return end
     pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
     task.wait(0.03)
     local limit = math.min(#targets, MAX_KILL_PER_CYCLE)
@@ -250,23 +200,19 @@ local function swingBatch(tool, targets)
         local t = targets[i]
         if t.m and t.m.Parent and t.p and t.p.Parent then
             local h = t.m:FindFirstChildWhichIsA("Humanoid", true)
-            if h and h.Health > 0 then
-                hitOnce(tool, t.m, t.p)
-            end
+            if h and h.Health > 0 then hitOnce(tool, t.m, t.p) end
         end
-        if i < limit then
-            task.wait(0.05)
-        end
+        if i < limit then task.wait(0.05) end
     end
     pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
 end
 
--- ===================== KILL AURA =====================
+-- =================== KILL AURA ===================
 local SCAN_FOLDERS = {"Characters","Enemies","Mobs","NPCs"}
 local function getAnimals(r)
     local out, ch, seen = {}, LP.Character, {}
-    local maxDistSq = CFG.KillRadius * CFG.KillRadius
-    local rPos = r.Position
+    local maxDSq = CFG.KillRadius * CFG.KillRadius
+    local rPos   = r.Position
 
     local function tryAdd(o)
         if seen[o] or o==ch then return end
@@ -276,11 +222,9 @@ local function getAnimals(r)
         local h = o:FindFirstChildWhichIsA("Humanoid", true)
         if not (h and h.Health>0) then return end
         local p = partOf(o); if not p then return end
-        local delta = p.Position - rPos
-        local dSq = delta.X*delta.X + delta.Y*delta.Y + delta.Z*delta.Z
-        if dSq <= maxDistSq then
-            table.insert(out, {m=o, p=p, dSq=dSq})
-        end
+        local d = p.Position - rPos
+        local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
+        if dSq <= maxDSq then table.insert(out, {m=o, p=p, dSq=dSq}) end
     end
 
     for _, o in ipairs(Workspace:GetChildren()) do
@@ -294,20 +238,19 @@ local function getAnimals(r)
             end
         end
     end
-
     table.sort(out, function(a,b) return a.dSq<b.dSq end)
     return out
 end
 
--- ===================== AUTO CHOP =====================
+-- =================== AUTO CHOP ===================
 local skipTree = {}
 local TREE_KEYS = {"Tree","Pine","Oak","Birch","Fir","Bush","Foliage"}
 
 local function getTrees(r)
     local out = {}
-    local maxDistSq = CFG.ChopRadius * CFG.ChopRadius
-    local rPos = r.Position
-    local now = os.clock()
+    local maxDSq = CFG.ChopRadius * CFG.ChopRadius
+    local rPos   = r.Position
+    local now    = os.clock()
 
     local function scanFolder(folder)
         if not folder then return end
@@ -315,9 +258,9 @@ local function getTrees(r)
             if not (skipTree[t] and now < skipTree[t]) then
                 local p = partOf(t)
                 if p then
-                    local delta = p.Position - rPos
-                    local dSq = delta.X*delta.X + delta.Y*delta.Y + delta.Z*delta.Z
-                    if dSq <= maxDistSq then
+                    local d = p.Position - rPos
+                    local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
+                    if dSq <= maxDSq then
                         table.insert(out, {m=t, p=p, dSq=dSq})
                     end
                 end
@@ -338,21 +281,20 @@ local function getTrees(r)
                 and not (skipTree[o] and now < skipTree[o]) then
                 local p = partOf(o)
                 if p then
-                    local delta = p.Position - rPos
-                    local dSq = delta.X*delta.X + delta.Y*delta.Y + delta.Z*delta.Z
-                    if dSq <= maxDistSq then
+                    local d = p.Position - rPos
+                    local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
+                    if dSq <= maxDSq then
                         table.insert(out, {m=o, p=p, dSq=dSq})
                     end
                 end
             end
         end
     end
-
     table.sort(out, function(a,b) return a.dSq<b.dSq end)
     return out
 end
 
--- ===================== VÒNG LẶP COMBAT =====================
+-- =================== COMBAT LOOP ===================
 task.spawn(function()
     while true do
         task.wait(CFG.Delay)
@@ -360,9 +302,7 @@ task.spawn(function()
             local r, tool = root(), getKillTool()
             if r and tool then
                 local targets = getAnimals(r)
-                if #targets > 0 then
-                    swingBatch(tool, targets)
-                end
+                if #targets > 0 then swingBatch(tool, targets) end
             end
         end
         if CFG.AutoChop then
@@ -379,16 +319,15 @@ task.spawn(function()
     end
 end)
 
--- ===================== MOVEMENT & NOCLIP =====================
+-- =================== MOVEMENT & NOCLIP ===================
 local noclipBackup = {}
-
 local function restoreNoclip()
     for part, wasCollide in pairs(noclipBackup) do
         if part and part.Parent and part:IsA("BasePart") then
             pcall(function() part.CanCollide = wasCollide end)
         end
-        noclipBackup[part] = nil
     end
+    noclipBackup = {}
 end
 
 RunService.Heartbeat:Connect(function()
@@ -398,25 +337,18 @@ RunService.Heartbeat:Connect(function()
 end)
 
 RunService.Stepped:Connect(function()
-    local c = LP.Character
-    if not c then return end
+    local c = LP.Character; if not c then return end
     if CFG.Noclip then
         for _, obj in ipairs(c:GetDescendants()) do
             if obj:IsA("BasePart") then
-                if noclipBackup[obj] == nil then
-                    noclipBackup[obj] = obj.CanCollide
-                end
-                if obj.CanCollide then
-                    obj.CanCollide = false
-                end
+                if noclipBackup[obj] == nil then noclipBackup[obj] = obj.CanCollide end
+                if obj.CanCollide then obj.CanCollide = false end
             end
         end
-    elseif next(noclipBackup) ~= nil then
-        restoreNoclip()
-    end
+    elseif next(noclipBackup) then restoreNoclip() end
 end)
 
--- ===================== FLY =====================
+-- =================== FLY ===================
 local flyBV, flyBG, flyConn
 local padUp, padDown = false, false
 
@@ -432,28 +364,43 @@ function startFly()
     stopFly()
     local r, h = root(), hum(); if not (r and h) then return end
     h.PlatformStand = true
+
     flyBV = Instance.new("BodyVelocity")
-    flyBV.MaxForce = Vector3.new(1e6,1e6,1e6); flyBV.Velocity=Vector3.zero; flyBV.Parent=r
+    flyBV.MaxForce = Vector3.new(1e6,1e6,1e6)
+    flyBV.Velocity = Vector3.zero
+    flyBV.Parent   = r
+
     flyBG = Instance.new("BodyGyro")
-    flyBG.MaxTorque = Vector3.new(1e6,1e6,1e6); flyBG.P=1e4; flyBG.Parent=r
+    flyBG.MaxTorque = Vector3.new(1e6,1e6,1e6)
+    flyBG.P = 1e4
+    flyBG.Parent = r
+
     flyConn = RunService.Heartbeat:Connect(function()
         local cam = Workspace.CurrentCamera
         local rr, hh = root(), hum()
         if not (cam and rr and hh and flyBV and flyBV.Parent) then return end
+
         local md = hh.MoveDirection
+        local camLook  = cam.CFrame.LookVector
+        local camRight = cam.CFrame.RightVector
+        local flatLook  = Vector3.new(camLook.X,  0, camLook.Z)
+        local flatRight = Vector3.new(camRight.X, 0, camRight.Z)
+        if flatLook.Magnitude  > 0 then flatLook  = flatLook.Unit  end
+        if flatRight.Magnitude > 0 then flatRight = flatRight.Unit end
+
+        -- md.Z âm = tiến về phía camera → flatLook * (-md.Z)
+        local moveDir = flatLook * (-md.Z) + flatRight * md.X
+
         local vy = 0
-        if UIS:IsKeyDown(Enum.KeyCode.Space)       or padUp   then vy= 1 end
-        if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or padDown then vy=-1 end
-        local look  = Vector3.new(cam.CFrame.LookVector.X,  0, cam.CFrame.LookVector.Z)
-        local right = Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z)
-        if look.Magnitude>0  then look=look.Unit   end
-        if right.Magnitude>0 then right=right.Unit end
-        flyBV.Velocity = (look*-md.Z + right*md.X)*CFG.FlySpeed + Vector3.new(0,vy*CFG.FlySpeed,0)
-        flyBG.CFrame = CFrame.new(rr.Position, rr.Position+look)
+        if UIS:IsKeyDown(Enum.KeyCode.Space)       or padUp   then vy =  1 end
+        if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or padDown then vy = -1 end
+
+        flyBV.Velocity = moveDir * CFG.FlySpeed + Vector3.new(0, vy * CFG.FlySpeed, 0)
+        flyBG.CFrame   = CFrame.new(rr.Position, rr.Position + flatLook)
     end)
 end
 
--- ===================== FULLBRIGHT =====================
+-- =================== FULLBRIGHT ===================
 local fbPrev, fbConn
 local function applyFB()
     Lighting.Brightness=3; Lighting.ClockTime=12; Lighting.FogEnd=1e6
@@ -462,11 +409,15 @@ local function applyFB()
 end
 local function setFullbright(on)
     if on then
-        if not fbPrev then fbPrev={B=Lighting.Brightness,C=Lighting.ClockTime,
-            F=Lighting.FogEnd,A=Lighting.Ambient,OA=Lighting.OutdoorAmbient} end
+        if not fbPrev then fbPrev={
+            B=Lighting.Brightness, C=Lighting.ClockTime,
+            F=Lighting.FogEnd, A=Lighting.Ambient, OA=Lighting.OutdoorAmbient
+        } end
         applyFB()
         if not fbConn then
-            fbConn = RunService.Heartbeat:Connect(function() if CFG.Fullbright then applyFB() end end)
+            fbConn = RunService.Heartbeat:Connect(function()
+                if CFG.Fullbright then applyFB() end
+            end)
         end
     else
         if fbConn then fbConn:Disconnect(); fbConn=nil end
@@ -478,85 +429,163 @@ local function setFullbright(on)
     end
 end
 
--- ===================== ESP TRẺ =====================
+-- =================== ESP TRẺ ===================
 local espTag = {}
 local function clearESPChild()
-    for _,hl in pairs(espTag) do if hl and hl.Parent then hl:Destroy() end end
-    espTag={}
+    for _, pair in pairs(espTag) do
+        if pair.hl and pair.hl.Parent then pair.hl:Destroy() end
+        if pair.bb and pair.bb.Parent then pair.bb:Destroy() end
+        if pair.conn then pair.conn:Disconnect() end
+    end
+    espTag = {}
 end
+
 task.spawn(function()
     while true do
-        task.wait(1)
+        task.wait(0.5)
         if CFG.ESPChild then
-            for m in pairs(espTag) do
-                if not m.Parent then if espTag[m] then espTag[m]:Destroy() end; espTag[m]=nil end
+            for m, pair in pairs(espTag) do
+                if not m.Parent then
+                    if pair.hl and pair.hl.Parent then pair.hl:Destroy() end
+                    if pair.bb and pair.bb.Parent then pair.bb:Destroy() end
+                    if pair.conn then pair.conn:Disconnect() end
+                    espTag[m] = nil
+                end
             end
             for _, m in ipairs(childCache) do
                 if m.Parent and not espTag[m] then
-                    local hl=Instance.new("Highlight")
-                    hl.FillColor=Color3.fromRGB(255,220,80)
-                    hl.OutlineColor=Color3.fromRGB(255,220,80)
-                    hl.FillTransparency=0.5; hl.Adornee=m; hl.Parent=m
-                    espTag[m]=hl
+                    local hl = Instance.new("Highlight")
+                    hl.FillColor        = Color3.fromRGB(255,220,80)
+                    hl.OutlineColor     = Color3.fromRGB(255,220,80)
+                    hl.FillTransparency = 0.45
+                    hl.Adornee = m; hl.Parent = m
+
+                    local adornPart = partOf(m)
+                    local bb, lblConn
+                    if adornPart then
+                        bb = Instance.new("BillboardGui")
+                        bb.Adornee     = adornPart
+                        bb.Size        = UDim2.new(0,160,0,44)
+                        bb.StudsOffset = Vector3.new(0,3,0)
+                        bb.AlwaysOnTop = true
+                        bb.Parent      = adornPart
+
+                        local lbl = Instance.new("TextLabel")
+                        lbl.Size               = UDim2.new(1,0,1,0)
+                        lbl.BackgroundTransparency = 1
+                        lbl.TextColor3         = Color3.fromRGB(255,230,80)
+                        lbl.TextStrokeColor3   = Color3.new(0,0,0)
+                        lbl.TextStrokeTransparency = 0.3
+                        lbl.Font               = Enum.Font.GothamBold
+                        lbl.TextSize           = 14
+                        lbl.Parent             = bb
+
+                        lblConn = RunService.Heartbeat:Connect(function()
+                            if not m.Parent or not CFG.ESPChild then
+                                lblConn:Disconnect(); return
+                            end
+                            local rr = root()
+                            local pp = partOf(m)
+                            if rr and pp then
+                                local dist = math.floor((pp.Position - rr.Position).Magnitude)
+                                lbl.Text = m.Name.."\n📍 "..dist.." studs"
+                            else
+                                lbl.Text = m.Name
+                            end
+                        end)
+                    end
+                    espTag[m] = { hl=hl, bb=bb, conn=lblConn }
                 end
             end
+        else
+            if next(espTag) then clearESPChild() end
         end
     end
 end)
 
--- ===================== TP & KÉO ĐỒ VỀ NGƯỜI CHƠI =====================
+-- =================== TP ===================
 local function tpTo(m)
-    local r,p = root(), partOf(m)
-    if r and p then r.CFrame=CFrame.new(p.Position+Vector3.new(0,4,0)) end
+    local r, p = root(), partOf(m)
+    if r and p then r.CFrame = CFrame.new(p.Position + Vector3.new(0,4,0)) end
 end
 local function tpCampfire()
-    local fp=getFirePart(); local r=root()
-    if fp and r then r.CFrame=CFrame.new(fp.Position+Vector3.new(0,4,0)) end
+    local fp = getFirePart(); local r = root()
+    if fp and r then r.CFrame = CFrame.new(fp.Position + Vector3.new(0,4,0)) end
 end
 
+-- =================== PULL PLAYER ===================
 local function pullPlayerToMe(plr)
-    if not plr or plr == LP then return false end
+    if not plr or plr==LP then return false end
     local r = root()
     local targetRoot = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
     if r and targetRoot then
-        targetRoot.CFrame = r.CFrame * CFrame.new(0, 1, -4)
+        targetRoot.CFrame = r.CFrame * CFrame.new(0,1,-4)
         return true
     end
     return false
 end
 
-local function scanExactItems(nameList)
-    local r = root()
-    local rPos = r and r.Position
-    local ch = LP.Character
-    local out = {}
-    local seen = {}
+-- =================== DỒN ĐỒ ĐẾN VỊ TRÍ BẤT KỲ ===================
+local droppedAt = {}
 
+local function dumpItemsTo(nameList, targetPart)
+    if not (targetPart and DragRE and StopDragRE) then
+        warn("[ollie] Thiếu vị trí đích hoặc remote kéo thả")
+        return 0
+    end
+    local ch, count, seen = LP.Character, 0, {}
     for _, o in ipairs(Workspace:GetDescendants()) do
+        if not (o:IsA("Model") or o:IsA("BasePart")) then continue end
         if seen[o] then continue end
         if ch and o:IsDescendantOf(ch) then continue end
-        if o:IsA("Model") or o:IsA("BasePart") then
-            if matchesExact(o.Name, nameList) then
-                seen[o] = true
-                local p = partOf(o)
-                if p then
-                    local dist = rPos and math.floor((p.Position - rPos).Magnitude) or 0
-                    table.insert(out, {
-                        obj = o,
-                        name = o.Name,
-                        part = p,
-                        dist = dist,
-                    })
-                end
-            end
-        end
-    end
+        if Players:GetPlayerFromCharacter(o) then continue end
+        if (droppedAt[o] or 0) + 20 > os.clock() then continue end
+        if not matchesExact(o.Name, nameList) then continue end
+        seen[o] = true
 
-    table.sort(out, function(a, b) return a.dist < b.dist end)
-    return out
+        -- Đảm bảo có PrimaryPart
+        if o:IsA("Model") then
+            if not o.PrimaryPart then
+                pcall(function() o.PrimaryPart = partOf(o) end)
+            end
+            if not o.PrimaryPart then continue end
+        end
+
+        droppedAt[o] = os.clock()
+        local offset = Vector3.new(
+            math.random(-25,25)/10,
+            6 + count * 0.4,
+            math.random(-25,25)/10
+        )
+        local targetCF = CFrame.new(targetPart.Position + offset)
+
+        pcall(DragRE.FireServer, DragRE, o)
+        if o:IsA("Model") then
+            pcall(function() o:SetPrimaryPartCFrame(targetCF) end)
+        else
+            pcall(function() o.CFrame = targetCF end)
+        end
+        task.wait(0.05)
+        pcall(StopDragRE.FireServer, StopDragRE, o)
+
+        count += 1
+        task.wait(0.1)
+    end
+    return count
 end
 
--- ===================== REVEAL MAP =====================
+-- Auto dồn nhiên liệu về lửa trại
+task.spawn(function()
+    while true do
+        task.wait(5)
+        if CFG.AutoDrop then
+            local fp = getFirePart()
+            if fp then pcall(dumpItemsTo, FUEL_EXACT, fp) end
+        end
+    end
+end)
+
+-- =================== REVEAL MAP ===================
 local function revealMap()
     if not MapRE then return end
     local cells={}
@@ -568,196 +597,82 @@ local function revealMap()
     end
 end
 
--- ===================== DỒN NGUYÊN LIỆU =====================
--- Chỉ dồn đúng các loại này, không có bộ lọc phụ
-local FUEL_EXACT = {
-    "Log", "Chair", "Biofuel", "Coal",
-    "Purple Fur Tuft", "Fuel Canister", "Oil Barrel",
-}
-
-local droppedAt = {}
-
-local function dropScan()
-    local fp = getFirePart()
-    if not (fp and DragRE and StopDragRE) then
-        warn("[ollie] Thiếu lửa trại hoặc remote kéo thả")
-        return 0
-    end
-
-    local ch    = LP.Character
-    local count = 0
-    local seen  = {}
-
-    for _, o in ipairs(Workspace:GetDescendants()) do
-        if not o:IsA("Model") then continue end
-        if seen[o] then continue end
-        if ch and o:IsDescendantOf(ch) then continue end
-        if Players:GetPlayerFromCharacter(o) then continue end
-        if (droppedAt[o] or 0) + 20 > os.clock() then continue end
-
-        -- Khớp chính xác tên (không dùng find để tránh nhầm)
-        local name = o.Name
-        local matched = false
-        for _, key in ipairs(FUEL_EXACT) do
-            if name == key then matched = true; break end
-        end
-        if not matched then continue end
-
-        seen[o] = true
-        if not o.PrimaryPart then
-            pcall(function() o.PrimaryPart = partOf(o) end)
-        end
-        if not o.PrimaryPart then continue end
-
-        droppedAt[o] = os.clock()
-        local offset = Vector3.new(
-            math.random(-20, 20) / 10,
-            8 + count * 0.5,
-            math.random(-20, 20) / 10
-        )
-
-        pcall(DragRE.FireServer,  DragRE, o)
-        pcall(function() o:SetPrimaryPartCFrame(CFrame.new(fp.Position + offset)) end)
-        task.wait(0.05)
-        pcall(StopDragRE.FireServer, StopDragRE, o)
-
-        count += 1
-        task.wait(0.1)
-    end
-
-    return count
-end
-
-task.spawn(function()
-    while true do
-        task.wait(5)
-        if CFG.AutoDrop then pcall(dropScan) end
-    end
-end)
-
--- ===================== FIX LAG PRO (GỌN & MẠNH) =====================
+-- =================== FIX LAG ===================
 local FixLag = false
 local LagBackup = {}
-local lagConn = nil
-local lagGen = 0
-
+local lagConn, lagGen = nil, 0
 local HEAVY_MATS = {
-    [Enum.Material.Neon] = Enum.Material.SmoothPlastic,
-    [Enum.Material.Glass] = Enum.Material.SmoothPlastic,
-    [Enum.Material.ForceField] = Enum.Material.SmoothPlastic,
-    [Enum.Material.DiamondPlate] = Enum.Material.SmoothPlastic,
-    [Enum.Material.CorrodedMetal] = Enum.Material.SmoothPlastic,
-    [Enum.Material.Foil] = Enum.Material.SmoothPlastic,
-    [Enum.Material.WoodPlanks] = Enum.Material.SmoothPlastic,
-    [Enum.Material.Cobblestone] = Enum.Material.SmoothPlastic,
+    [Enum.Material.Neon]=Enum.Material.SmoothPlastic,
+    [Enum.Material.Glass]=Enum.Material.SmoothPlastic,
+    [Enum.Material.ForceField]=Enum.Material.SmoothPlastic,
+    [Enum.Material.DiamondPlate]=Enum.Material.SmoothPlastic,
+    [Enum.Material.CorrodedMetal]=Enum.Material.SmoothPlastic,
+    [Enum.Material.Foil]=Enum.Material.SmoothPlastic,
+    [Enum.Material.WoodPlanks]=Enum.Material.SmoothPlastic,
+    [Enum.Material.Cobblestone]=Enum.Material.SmoothPlastic,
 }
-
 local function saveProp(obj, prop)
     local t = LagBackup[obj]
-    if not t then
-        t = {}
-        LagBackup[obj] = t
-    end
-    if t[prop] == nil then
-        local ok, val = pcall(function() return obj[prop] end)
-        if ok then t[prop] = val end
+    if not t then t={}; LagBackup[obj]=t end
+    if t[prop]==nil then
+        local ok,val = pcall(function() return obj[prop] end)
+        if ok then t[prop]=val end
     end
 end
-
 local function optimizeObj(obj)
     if not FixLag or not obj or not obj.Parent then return end
-
-    if obj:IsA("ParticleEmitter")
-    or obj:IsA("Trail")
-    or obj:IsA("Beam")
-    or obj:IsA("Smoke")
-    or obj:IsA("Fire")
-    or obj:IsA("Sparkles")
-    or obj:IsA("PointLight")
-    or obj:IsA("SpotLight")
-    or obj:IsA("SurfaceLight") then
-        saveProp(obj, "Enabled")
-        pcall(function() obj.Enabled = false end)
-        return
+    if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
+    or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles")
+    or obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+        saveProp(obj,"Enabled"); pcall(function() obj.Enabled=false end); return
     end
-
     if obj:IsA("BasePart") then
-        saveProp(obj, "CastShadow")
-        pcall(function() obj.CastShadow = false end)
-
-        saveProp(obj, "Material")
-        local nextMat = HEAVY_MATS[obj.Material] or Enum.Material.Plastic
-        if obj.Material ~= nextMat then
-            pcall(function() obj.Material = nextMat end)
-        end
+        saveProp(obj,"CastShadow"); pcall(function() obj.CastShadow=false end)
+        saveProp(obj,"Material")
+        local mat = HEAVY_MATS[obj.Material] or Enum.Material.Plastic
+        if obj.Material ~= mat then pcall(function() obj.Material=mat end) end
     end
 end
-
 local function enableFixLag()
-    if FixLag then return end
-    FixLag = true
-    lagGen += 1
-    local gen = lagGen
-
-    for _, prop in ipairs({"GlobalShadows", "EnvironmentDiffuseScale", "EnvironmentSpecularScale", "ShadowSoftness"}) do
+    if FixLag then return end; FixLag=true; lagGen+=1; local gen=lagGen
+    for _, prop in ipairs({"GlobalShadows","EnvironmentDiffuseScale","EnvironmentSpecularScale","ShadowSoftness"}) do
         saveProp(Lighting, prop)
     end
     pcall(function()
-        Lighting.GlobalShadows = false
-        Lighting.EnvironmentDiffuseScale = 0
-        Lighting.EnvironmentSpecularScale = 0
-        Lighting.ShadowSoftness = 0
+        Lighting.GlobalShadows=false; Lighting.EnvironmentDiffuseScale=0
+        Lighting.EnvironmentSpecularScale=0; Lighting.ShadowSoftness=0
     end)
-
     if not lagConn then
         lagConn = Workspace.DescendantAdded:Connect(function(obj)
             if FixLag then task.defer(optimizeObj, obj) end
         end)
     end
-
     task.spawn(function()
         local all = Workspace:GetDescendants()
-        for i = 1, #all do
-            if not FixLag or gen ~= lagGen then return end
+        for i=1,#all do
+            if not FixLag or gen~=lagGen then return end
             optimizeObj(all[i])
-            if i % 500 == 0 then task.wait() end
+            if i%500==0 then task.wait() end
         end
     end)
-
-    print("[ollie] Fix Lag Pro ON")
 end
-
 local function disableFixLag()
-    if not FixLag then return end
-    FixLag = false
-    lagGen += 1
-
-    if lagConn then
-        lagConn:Disconnect()
-        lagConn = nil
-    end
-
+    if not FixLag then return end; FixLag=false; lagGen+=1
+    if lagConn then lagConn:Disconnect(); lagConn=nil end
     for obj, props in pairs(LagBackup) do
         if obj and obj.Parent then
-            for prop, val in pairs(props) do
-                pcall(function() obj[prop] = val end)
-            end
+            for prop, val in pairs(props) do pcall(function() obj[prop]=val end) end
         end
     end
-
-    LagBackup = {}
-    print("[ollie] Fix Lag Pro OFF")
+    LagBackup={}
 end
+local function setFixLag(v) if v then enableFixLag() else disableFixLag() end end
 
-local function setFixLag(value)
-    if value then enableFixLag() else disableFixLag() end
-end
-
--- ===================== GUI =====================
-local old = PlayerGui:FindFirstChild("ollie_v7")
+-- =================== GUI ===================
+local old = PlayerGui:FindFirstChild("ollie_v8")
 if old then old:Destroy() end
 local gui = Instance.new("ScreenGui")
-gui.Name="ollie_v7"; gui.ResetOnSpawn=false
+gui.Name="ollie_v8"; gui.ResetOnSpawn=false
 gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; gui.Parent=PlayerGui
 
 local C_BG  = Color3.fromRGB(14,15,20)
@@ -771,9 +686,12 @@ local C_BTN = Color3.fromRGB(180,210,255)
 local C_SUB = Color3.fromRGB(140,142,158)
 local C_SLD = Color3.fromRGB(80,160,220)
 
-local function mkCorner(p,r) local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,r or 7); c.Parent=p end
-local function mkStroke(p,col,th) local s=Instance.new("UIStroke"); s.Color=col or Color3.fromRGB(40,43,55); s.Thickness=th or 1; s.Parent=p end
-
+local function mkCorner(p,r)
+    local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,r or 7); c.Parent=p
+end
+local function mkStroke(p,col,th)
+    local s=Instance.new("UIStroke"); s.Color=col or Color3.fromRGB(40,43,55); s.Thickness=th or 1; s.Parent=p
+end
 local function makeDraggable(handle, target)
     local drag,si,sp
     handle.InputBegan:Connect(function(i)
@@ -796,8 +714,8 @@ fab.BackgroundColor3=C_HDR; fab.Text="99"; fab.Font=Enum.Font.GothamBold
 fab.TextSize=13; fab.TextColor3=C_ACC; fab.Visible=false; fab.Parent=gui
 mkCorner(fab,22); mkStroke(fab,C_ACC,1.5); makeDraggable(fab,fab)
 
--- Panel chính (rộng hơn để chứa slider)
-local W,H = 460,360
+-- Panel
+local W,H = 460,370
 local panel=Instance.new("Frame")
 panel.Size=UDim2.new(0,W,0,H); panel.Position=UDim2.new(0.5,-W/2,0.5,-H/2)
 panel.BackgroundColor3=C_BG; panel.BorderSizePixel=0; panel.Parent=gui
@@ -810,7 +728,7 @@ makeDraggable(header,panel)
 
 local titleLbl=Instance.new("TextLabel")
 titleLbl.Size=UDim2.new(1,-44,1,0); titleLbl.Position=UDim2.new(0,10,0,0)
-titleLbl.BackgroundTransparency=1; titleLbl.Text="🌲  99 Nights · ollie v7"
+titleLbl.BackgroundTransparency=1; titleLbl.Text="🌲  99 Nights · ollie v8"
 titleLbl.TextColor3=C_ACC; titleLbl.Font=Enum.Font.GothamBold
 titleLbl.TextSize=13; titleLbl.TextXAlignment=Enum.TextXAlignment.Left; titleLbl.Parent=header
 
@@ -821,10 +739,9 @@ minBtn.Font=Enum.Font.GothamBold; minBtn.TextSize=16; minBtn.Parent=header; mkCo
 minBtn.MouseButton1Click:Connect(function() panel.Visible=false; fab.Visible=true end)
 fab.MouseButton1Click:Connect(function() panel.Visible=true; fab.Visible=false end)
 
--- Tab bar
+-- Tabs
 local TAB_NAMES = {"Chính","Slider","Trẻ em","TP & Đồ"}
 local tabs, tabBtns = {}, {}
-local activeTab = 1
 
 local tabBar=Instance.new("Frame")
 tabBar.Size=UDim2.new(1,-12,0,28); tabBar.Position=UDim2.new(0,6,0,34)
@@ -847,47 +764,36 @@ for i,name in ipairs(TAB_NAMES) do
     l.HorizontalAlignment=Enum.HorizontalAlignment.Center; l.Parent=sf
     local p=Instance.new("UIPadding"); p.PaddingTop=UDim.new(0,4); p.Parent=sf
     tabs[i]=sf
-
     local btn=Instance.new("TextButton")
     btn.Size=UDim2.new(0,0,1,0); btn.AutomaticSize=Enum.AutomaticSize.X
     btn.BackgroundColor3=(i==1) and C_ON or C_OFF
     btn.Text=" "..name.." "; btn.TextColor3=C_TXT
     btn.Font=Enum.Font.GothamBold; btn.TextSize=11
     btn.BorderSizePixel=0; btn.Parent=tabBar; mkCorner(btn,5)
-    local function selectTab(idx)
-        for j,t in ipairs(tabs) do t.Visible=(j==idx) end
-        for j,b in ipairs(tabBtns) do b.BackgroundColor3=(j==idx) and C_ON or C_OFF end
-        activeTab=idx
-    end
-    btn.MouseButton1Click:Connect(function() selectTab(i) end)
+    btn.MouseButton1Click:Connect(function()
+        for j,t in ipairs(tabs) do t.Visible=(j==i) end
+        for j,b in ipairs(tabBtns) do b.BackgroundColor3=(j==i) and C_ON or C_OFF end
+    end)
     tabBtns[i]=btn
 end
 
--- ===================== WIDGET BUILDERS =====================
-local function mkScroll(parent)
-    return parent -- tabs[i] đã là ScrollingFrame
-end
-
+-- Widgets
 local function toggle(parent, label, getV, setV)
     local row=Instance.new("Frame")
     row.Size=UDim2.new(0.95,0,0,28); row.BackgroundColor3=C_ROW
     row.BorderSizePixel=0; row.Parent=parent; mkCorner(row,6)
-
     local lb=Instance.new("TextLabel")
     lb.Size=UDim2.new(1,-50,1,0); lb.Position=UDim2.new(0,8,0,0)
     lb.BackgroundTransparency=1; lb.Text=label; lb.TextColor3=C_TXT
     lb.Font=Enum.Font.Gotham; lb.TextSize=11
     lb.TextXAlignment=Enum.TextXAlignment.Left; lb.Parent=row
-
     local track=Instance.new("TextButton")
     track.Size=UDim2.new(0,38,0,18); track.Position=UDim2.new(1,-44,0.5,-9)
     track.BorderSizePixel=0; track.Text=""; track.Parent=row; mkCorner(track,9)
-
     local knob=Instance.new("Frame")
     knob.Size=UDim2.new(0,14,0,14); knob.AnchorPoint=Vector2.new(0,0.5)
     knob.BackgroundColor3=Color3.new(1,1,1); knob.BorderSizePixel=0
     knob.Parent=track; mkCorner(knob,7)
-
     local function refresh(instant)
         local on=getV()
         track.BackgroundColor3=on and C_ON or C_OFF
@@ -897,7 +803,6 @@ local function toggle(parent, label, getV, setV)
     end
     refresh(true)
     track.MouseButton1Click:Connect(function() setV(not getV()); refresh() end)
-    return refresh
 end
 
 local function button(parent, text, cb)
@@ -917,42 +822,38 @@ local function section(parent, text)
     l.TextXAlignment=Enum.TextXAlignment.Left; l.Parent=f
 end
 
--- Slider tùy chỉnh
 local function slider(parent, label, minV, maxV, getV, setV)
     local row=Instance.new("Frame")
     row.Size=UDim2.new(0.95,0,0,46); row.BackgroundColor3=C_ROW
     row.BorderSizePixel=0; row.Parent=parent; mkCorner(row,6)
-
     local lbl=Instance.new("TextLabel")
     lbl.Size=UDim2.new(1,-8,0,20); lbl.Position=UDim2.new(0,8,0,2)
     lbl.BackgroundTransparency=1
-    lbl.Text=string.format("%s: %d", label, getV())
+    lbl.Text=string.format("%s: %d",label,getV())
     lbl.TextColor3=C_TXT; lbl.Font=Enum.Font.Gotham; lbl.TextSize=11
     lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.Parent=row
-
     local track=Instance.new("Frame")
     track.Size=UDim2.new(1,-16,0,6); track.Position=UDim2.new(0,8,0,32)
     track.BackgroundColor3=C_OFF; track.BorderSizePixel=0; track.Parent=row; mkCorner(track,3)
-
     local fill=Instance.new("Frame")
     fill.Size=UDim2.new((getV()-minV)/(maxV-minV),0,1,0)
     fill.BackgroundColor3=C_SLD; fill.BorderSizePixel=0; fill.Parent=track; mkCorner(fill,3)
-
     local knob=Instance.new("TextButton")
     knob.Size=UDim2.new(0,16,0,16); knob.AnchorPoint=Vector2.new(0.5,0.5)
     knob.Position=UDim2.new((getV()-minV)/(maxV-minV),0,0.5,0)
     knob.BackgroundColor3=Color3.new(1,1,1); knob.Text=""
     knob.BorderSizePixel=0; knob.ZIndex=5; knob.Parent=track; mkCorner(knob,8)
-
     local dragging=false
     knob.MouseButton1Down:Connect(function() dragging=true end)
-    knob.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then dragging=true end end)
+    knob.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.Touch then dragging=true end end)
     UIS.InputEnded:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
-            dragging=false end end)
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
     UIS.InputChanged:Connect(function(i)
         if not dragging then return end
-        if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
+        if i.UserInputType==Enum.UserInputType.MouseMovement
+        or i.UserInputType==Enum.UserInputType.Touch then
             local mouse=UIS:GetMouseLocation()
             local abs=track.AbsolutePosition; local sz=track.AbsoluteSize
             local rel=math.clamp((mouse.X-abs.X)/sz.X,0,1)
@@ -969,7 +870,6 @@ end
 local flyPad=Instance.new("Frame")
 flyPad.Size=UDim2.new(0,60,0,124); flyPad.Position=UDim2.new(1,-70,1,-132)
 flyPad.BackgroundTransparency=1; flyPad.Visible=false; flyPad.Parent=gui
-
 local function holdBtn(yOff,text,onState)
     local b=Instance.new("TextButton")
     b.Size=UDim2.new(0,56,0,56); b.Position=UDim2.new(0,0,0,yOff)
@@ -979,16 +879,16 @@ local function holdBtn(yOff,text,onState)
     b.MouseButton1Down:Connect(function() onState(true) end)
     b.MouseButton1Up:Connect(function() onState(false) end)
     b.MouseLeave:Connect(function() onState(false) end)
-    b.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then onState(true) end end)
-    b.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then onState(false) end end)
+    b.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.Touch then onState(true) end end)
+    b.InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.Touch then onState(false) end end)
 end
 holdBtn(0,"▲",function(v) padUp=v end)
 holdBtn(68,"▼",function(v) padDown=v end)
 
--- ===================== TAB 1: CHÍNH =====================
-local t1 = tabs[1]
-
--- Hiển thị vũ khí đang dùng
+-- ===== TAB 1: CHÍNH =====
+local t1=tabs[1]
 local wRow=Instance.new("Frame")
 wRow.Size=UDim2.new(0.95,0,0,24); wRow.BackgroundColor3=C_HDR
 wRow.BorderSizePixel=0; wRow.Parent=t1; mkCorner(wRow,5)
@@ -999,58 +899,60 @@ wLbl.Font=Enum.Font.Gotham; wLbl.TextSize=10
 wLbl.TextXAlignment=Enum.TextXAlignment.Left; wLbl.Parent=wRow
 task.spawn(function()
     while true do task.wait(1)
-        local t=getKillTool(); wLbl.Text="🗡 "..(t and t.Name or "Không có vũ khí") end end)
-
-section(t1,"PERFORMANCE")
-
-toggle(t1,"⚡ Fix Lag Pro",function()
-    return FixLag
-end,function(v)
-    setFixLag(v)
+        local t=getKillTool()
+        wLbl.Text="🗡 "..(t and t.Name or "Không có vũ khí")
+    end
 end)
 
+section(t1,"PERFORMANCE")
+toggle(t1,"⚡ Fix Lag Pro",function() return FixLag end,function(v) setFixLag(v) end)
+
 section(t1,"MOVEMENT")
-toggle(t1,"Speed",   function() return CFG.Speed end, function(v) CFG.Speed=v end)
-toggle(t1,"High Jump",function() return CFG.Jump  end, function(v) CFG.Jump=v end)
-toggle(t1,"Fly",     function() return CFG.Fly   end, function(v)
+toggle(t1,"Speed",        function() return CFG.Speed    end,function(v) CFG.Speed=v end)
+toggle(t1,"High Jump",    function() return CFG.Jump     end,function(v) CFG.Jump=v end)
+toggle(t1,"Fly",          function() return CFG.Fly      end,function(v)
     CFG.Fly=v; flyPad.Visible=v; if v then startFly() else stopFly() end end)
-toggle(t1,"👻 Đi xuyên tường",function() return CFG.Noclip end, function(v)
+toggle(t1,"👻 Noclip",    function() return CFG.Noclip   end,function(v)
     CFG.Noclip=v; if not v then restoreNoclip() end end)
-toggle(t1,"Fullbright",function() return CFG.Fullbright end, function(v)
+toggle(t1,"Fullbright",   function() return CFG.Fullbright end,function(v)
     CFG.Fullbright=v; setFullbright(v) end)
 
 section(t1,"COMBAT")
-toggle(t1,"Kill Aura", function() return CFG.KillAura end, function(v) CFG.KillAura=v end)
-toggle(t1,"Auto Chop", function() return CFG.AutoChop end, function(v) CFG.AutoChop=v end)
+toggle(t1,"Kill Aura",    function() return CFG.KillAura end,function(v) CFG.KillAura=v end)
+toggle(t1,"Auto Chop",    function() return CFG.AutoChop end,function(v) CFG.AutoChop=v end)
 
 section(t1,"UTILITY")
-toggle(t1,"ESP Trẻ",   function() return CFG.ESPChild end, function(v)
+toggle(t1,"ESP Trẻ",      function() return CFG.ESPChild end,function(v)
     CFG.ESPChild=v; if not v then clearESPChild() end end)
-toggle(t1,"Auto dồn đồ",function() return CFG.AutoDrop end, function(v) CFG.AutoDrop=v end)
+toggle(t1,"Auto dồn nhiên liệu → Lửa trại",
+    function() return CFG.AutoDrop end,function(v) CFG.AutoDrop=v end)
 button(t1,"🔥 TP Lửa trại", tpCampfire)
-button(t1,"🪵 Dồn đồ ngay", function()
-    task.spawn(function() local n=dropScan(); print("[ollie] Đã dồn "..n.." món") end) end)
+button(t1,"🪵 Dồn nhiên liệu → Lửa trại ngay", function()
+    task.spawn(function()
+        local fp = getFirePart()
+        if not fp then print("[ollie] Không thấy lửa trại"); return end
+        local n = dumpItemsTo(FUEL_EXACT, fp)
+        print("[ollie] Đã dồn "..n.." món về lửa trại")
+    end)
+end)
 button(t1,"🗺️ Reveal map", function() task.spawn(revealMap) end)
 
--- ===================== TAB 2: SLIDER =====================
-local t2 = tabs[2]
+-- ===== TAB 2: SLIDER =====
+local t2=tabs[2]
 section(t2,"TỐC ĐỘ & NHẢY")
-slider(t2,"Walk Speed",  16, 300, function() return CFG.WalkSpeed end, function(v) CFG.WalkSpeed=v end)
-slider(t2,"Jump Power",  50, 500, function() return CFG.JumpPower end, function(v) CFG.JumpPower=v end)
-slider(t2,"Fly Speed",   10, 200, function() return CFG.FlySpeed  end, function(v) CFG.FlySpeed=v  end)
-
+slider(t2,"Walk Speed", 16,300,function() return CFG.WalkSpeed end,function(v) CFG.WalkSpeed=v end)
+slider(t2,"Jump Power", 50,500,function() return CFG.JumpPower end,function(v) CFG.JumpPower=v end)
+slider(t2,"Fly Speed",  10,200,function() return CFG.FlySpeed  end,function(v) CFG.FlySpeed=v  end)
 section(t2,"PHẠM VI TẤN CÔNG")
-slider(t2,"Kill Radius",  10, 500, function() return CFG.KillRadius  end, function(v) CFG.KillRadius=v  end)
-slider(t2,"Chop Radius",  10, 500, function() return CFG.ChopRadius  end, function(v) CFG.ChopRadius=v  end)
-
+slider(t2,"Kill Radius",10,500,function() return CFG.KillRadius end,function(v) CFG.KillRadius=v end)
+slider(t2,"Chop Radius",10,500,function() return CFG.ChopRadius end,function(v) CFG.ChopRadius=v end)
 section(t2,"TỐC ĐỘ ĐÁNH")
-slider(t2,"Delay (x10ms)", 5, 60,
+slider(t2,"Delay (x10ms)",5,60,
     function() return math.floor(CFG.Delay*100) end,
     function(v) CFG.Delay=v/100 end)
 
--- ===================== TAB 3: TRẺ EM =====================
-local t3 = tabs[3]
-
+-- ===== TAB 3: TRẺ EM =====
+local t3=tabs[3]
 local scanTop=Instance.new("Frame")
 scanTop.Size=UDim2.new(0.95,0,0,28); scanTop.BackgroundColor3=C_HDR
 scanTop.BorderSizePixel=0; scanTop.Parent=t3; mkCorner(scanTop,6)
@@ -1096,7 +998,6 @@ local function populateChildren()
         local row=Instance.new("Frame")
         row.Size=UDim2.new(1,-4,0,48); row.BackgroundColor3=C_ROW
         row.BorderSizePixel=0; row.Parent=childContainer; mkCorner(row,6)
-
         local nameLbl=Instance.new("TextLabel")
         nameLbl.Size=UDim2.new(1,-50,0,20); nameLbl.Position=UDim2.new(0,8,0,4)
         nameLbl.BackgroundTransparency=1
@@ -1104,14 +1005,12 @@ local function populateChildren()
         nameLbl.TextColor3=C_TXT; nameLbl.Font=Enum.Font.GothamBold
         nameLbl.TextSize=11; nameLbl.TextXAlignment=Enum.TextXAlignment.Left
         nameLbl.TextTruncate=Enum.TextTruncate.AtEnd; nameLbl.Parent=row
-
         local distLbl=Instance.new("TextLabel")
         distLbl.Size=UDim2.new(1,-50,0,16); distLbl.Position=UDim2.new(0,8,0,26)
         distLbl.BackgroundTransparency=1
         distLbl.Text=string.format("📍 %d studs",item.d)
         distLbl.TextColor3=C_SUB; distLbl.Font=Enum.Font.Gotham
         distLbl.TextSize=10; distLbl.TextXAlignment=Enum.TextXAlignment.Left; distLbl.Parent=row
-
         local tpBtn=Instance.new("TextButton")
         tpBtn.Size=UDim2.new(0,36,0,20); tpBtn.Position=UDim2.new(1,-42,0.5,-10)
         tpBtn.BackgroundColor3=C_ON; tpBtn.BorderSizePixel=0; tpBtn.Text="TP"
@@ -1122,184 +1021,78 @@ local function populateChildren()
 end
 scanBtn.MouseButton1Click:Connect(populateChildren)
 
--- ===================== TAB 4: TP & ĐỒ =====================
-local t4 = tabs[4]
+-- ===== TAB 4: TP & ĐỒ =====
+local t4=tabs[4]
 
-section(t4, "NGƯỜI CHƠI (KÉO VỀ VỊ TRÍ BẠN)")
-local plrListContainer = Instance.new("Frame")
-plrListContainer.Size = UDim2.new(0.95, 0, 0, 0)
-plrListContainer.AutomaticSize = Enum.AutomaticSize.Y
-plrListContainer.BackgroundTransparency = 1
-plrListContainer.BorderSizePixel = 0
-plrListContainer.Parent = t4
-local plrLayout = Instance.new("UIListLayout")
-plrLayout.Padding = UDim.new(0, 4)
-plrLayout.Parent = plrListContainer
+-- Người chơi
+section(t4,"NGƯỜI CHƠI")
+local plrContainer=Instance.new("Frame")
+plrContainer.Size=UDim2.new(0.95,0,0,0); plrContainer.AutomaticSize=Enum.AutomaticSize.Y
+plrContainer.BackgroundTransparency=1; plrContainer.BorderSizePixel=0; plrContainer.Parent=t4
+local plrLayout=Instance.new("UIListLayout"); plrLayout.Padding=UDim.new(0,4); plrLayout.Parent=plrContainer
 
 local function refreshPlayers()
-    for _, c in ipairs(plrListContainer:GetChildren()) do
-        if c:IsA("GuiObject") then c:Destroy() end
-    end
-    local r = root()
-    local others = {}
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LP then
-            local pRoot = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
-            local dist = (r and pRoot) and math.floor((pRoot.Position - r.Position).Magnitude) or 0
-            table.insert(others, {plr = plr, dist = dist, hasChar = pRoot ~= nil})
+    for _,c in ipairs(plrContainer:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+    local r=root(); local others={}
+    for _,plr in ipairs(Players:GetPlayers()) do
+        if plr~=LP then
+            local pRoot=plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+            local dist=(r and pRoot) and math.floor((pRoot.Position-r.Position).Magnitude) or 0
+            table.insert(others,{plr=plr,dist=dist,hasChar=pRoot~=nil})
         end
     end
-    table.sort(others, function(a, b) return a.dist < b.dist end)
-    if #others == 0 then
-        local empty = Instance.new("TextLabel")
-        empty.Size = UDim2.new(1, 0, 0, 22)
-        empty.BackgroundTransparency = 1
-        empty.Text = "Không có người chơi khác trong map"
-        empty.TextColor3 = C_SUB
-        empty.Font = Enum.Font.Gotham
-        empty.TextSize = 10
-        empty.Parent = plrListContainer
+    table.sort(others,function(a,b) return a.dist<b.dist end)
+    if #others==0 then
+        local e=Instance.new("TextLabel"); e.Size=UDim2.new(1,0,0,22)
+        e.BackgroundTransparency=1; e.Text="Không có người chơi khác"
+        e.TextColor3=C_SUB; e.Font=Enum.Font.Gotham; e.TextSize=10; e.Parent=plrContainer
         return
     end
-    for _, info in ipairs(others) do
-        local row = Instance.new("Frame")
-        row.Size = UDim2.new(1, -4, 0, 32)
-        row.BackgroundColor3 = C_ROW
-        row.BorderSizePixel = 0
-        row.Parent = plrListContainer
-        mkCorner(row, 6)
-
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(1, -56, 1, 0)
-        lbl.Position = UDim2.new(0, 8, 0, 0)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = info.hasChar and string.format("%s (%d studs)", info.plr.Name, info.dist) or (info.plr.Name .. " (chờ spawn)")
-        lbl.TextColor3 = C_TXT
-        lbl.Font = Enum.Font.Gotham
-        lbl.TextSize = 11
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.TextTruncate = Enum.TextTruncate.AtEnd
-        lbl.Parent = row
-
-        local goBtn = Instance.new("TextButton")
-        goBtn.Size = UDim2.new(0, 44, 0, 20)
-        goBtn.Position = UDim2.new(1, -50, 0.5, -10)
-        goBtn.BackgroundColor3 = info.hasChar and C_ON or C_OFF
-        goBtn.BorderSizePixel = 0
-        goBtn.Text = "Kéo về"
-        goBtn.TextColor3 = Color3.new(1, 1, 1)
-        goBtn.Font = Enum.Font.GothamBold
-        goBtn.TextSize = 10
-        goBtn.Parent = row
-        mkCorner(goBtn, 5)
+    for _,info in ipairs(others) do
+        local row=Instance.new("Frame")
+        row.Size=UDim2.new(1,-4,0,32); row.BackgroundColor3=C_ROW
+        row.BorderSizePixel=0; row.Parent=plrContainer; mkCorner(row,6)
+        local lbl=Instance.new("TextLabel")
+        lbl.Size=UDim2.new(1,-56,1,0); lbl.Position=UDim2.new(0,8,0,0)
+        lbl.BackgroundTransparency=1
+        lbl.Text=info.hasChar
+            and string.format("%s (%d studs)",info.plr.Name,info.dist)
+            or info.plr.Name.." (chờ spawn)"
+        lbl.TextColor3=C_TXT; lbl.Font=Enum.Font.Gotham; lbl.TextSize=11
+        lbl.TextXAlignment=Enum.TextXAlignment.Left
+        lbl.TextTruncate=Enum.TextTruncate.AtEnd; lbl.Parent=row
+        local goBtn=Instance.new("TextButton")
+        goBtn.Size=UDim2.new(0,44,0,20); goBtn.Position=UDim2.new(1,-50,0.5,-10)
+        goBtn.BackgroundColor3=info.hasChar and C_ON or C_OFF
+        goBtn.BorderSizePixel=0; goBtn.Text="Kéo về"
+        goBtn.TextColor3=Color3.new(1,1,1); goBtn.Font=Enum.Font.GothamBold
+        goBtn.TextSize=10; goBtn.Parent=row; mkCorner(goBtn,5)
         goBtn.MouseButton1Click:Connect(function() pullPlayerToMe(info.plr) end)
     end
 end
-
-button(t4, "🔄 Làm mới danh sách người chơi", refreshPlayers)
+button(t4,"🔄 Làm mới người chơi", refreshPlayers)
 refreshPlayers()
 
-local function buildItemCategoryUI(titleText, scanBtnText, pullAllText, itemList, emptyLabel)
-    section(t4, titleText)
-
-    local listContainer = Instance.new("Frame")
-    listContainer.Size = UDim2.new(0.95, 0, 0, 0)
-    listContainer.AutomaticSize = Enum.AutomaticSize.Y
-    listContainer.BackgroundTransparency = 1
-    listContainer.BorderSizePixel = 0
-    listContainer.Parent = t4
-    local layout = Instance.new("UIListLayout")
-    layout.Padding = UDim.new(0, 4)
-    layout.Parent = listContainer
-
-    local latestItems = {}
-
-    local function renderList()
-        for _, c in ipairs(listContainer:GetChildren()) do
-            if c:IsA("GuiObject") then c:Destroy() end
-        end
-        if #latestItems == 0 then
-            local empty = Instance.new("TextLabel")
-            empty.Size = UDim2.new(1, 0, 0, 24)
-            empty.BackgroundTransparency = 1
-            empty.Text = "Không tìm thấy " .. emptyLabel
-            empty.TextColor3 = C_SUB
-            empty.Font = Enum.Font.Gotham
-            empty.TextSize = 11
-            empty.Parent = listContainer
-            return
-        end
-        local maxShow = math.min(#latestItems, 20)
-        for i = 1, maxShow do
-            local entry = latestItems[i]
-            local row = Instance.new("Frame")
-            row.Size = UDim2.new(1, -4, 0, 34)
-            row.BackgroundColor3 = C_ROW
-            row.BorderSizePixel = 0
-            row.Parent = listContainer
-            mkCorner(row, 6)
-
-            local nameLbl = Instance.new("TextLabel")
-            nameLbl.Size = UDim2.new(1, -56, 1, 0)
-            nameLbl.Position = UDim2.new(0, 8, 0, 0)
-            nameLbl.BackgroundTransparency = 1
-            nameLbl.Text = string.format("%d. %s · %d studs", i, entry.name, entry.dist)
-            nameLbl.TextColor3 = C_TXT
-            nameLbl.Font = Enum.Font.Gotham
-            nameLbl.TextSize = 11
-            nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-            nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-            nameLbl.Parent = row
-
-            local pullBtn = Instance.new("TextButton")
-            pullBtn.Size = UDim2.new(0, 44, 0, 20)
-            pullBtn.Position = UDim2.new(1, -50, 0.5, -10)
-            pullBtn.BackgroundColor3 = C_ON
-            pullBtn.BorderSizePixel = 0
-            pullBtn.Text = "Kéo về"
-            pullBtn.TextColor3 = Color3.new(1, 1, 1)
-            pullBtn.Font = Enum.Font.GothamBold
-            pullBtn.TextSize = 10
-            pullBtn.Parent = row
-            mkCorner(pullBtn, 5)
-            pullBtn.MouseButton1Click:Connect(function()
-                bringToPlayer(entry.obj, i - 1)
-            end)
-        end
-    end
-
-    button(t4, scanBtnText, function()
-        latestItems = scanExactItems(itemList)
-        renderList()
+-- Thức ăn → Crafting Bench
+section(t4,"THỨC ĂN → BÀN CHẾ TẠO")
+button(t4,"🍎 Dồn thức ăn → Crafting Bench", function()
+    task.spawn(function()
+        local cp = getCraftingTablePart()
+        if not cp then return end
+        local n = dumpItemsTo(FOOD_ITEMS, cp)
+        print("[ollie] Dồn "..n.." thức ăn về Crafting Bench")
     end)
+end)
 
-    button(t4, pullAllText, function()
-        task.spawn(function()
-            latestItems = scanExactItems(itemList)
-            local limit = math.min(#latestItems, 12)
-            for i = 1, limit do
-                bringToPlayer(latestItems[i].obj, i - 1)
-                task.wait(0.06)
-            end
-            renderList()
-        end)
+-- Nguyên liệu sắt + Log → Crafting Bench
+section(t4,"NGUYÊN LIỆU → BÀN CHẾ TẠO")
+button(t4,"⚙️ Dồn nguyên liệu → Crafting Bench", function()
+    task.spawn(function()
+        local cp = getCraftingTablePart()
+        if not cp then return end
+        local n = dumpItemsTo(SCRAP_ITEMS, cp)
+        print("[ollie] Dồn "..n.." nguyên liệu về Crafting Bench")
     end)
-end
+end)
 
-buildItemCategoryUI(
-    "THỨC ĂN",
-    "🍎 Quét Thức ăn (Berry, Carrot, Apple, Corn, Pumpkin, Chili)",
-    "🧺 Kéo Thức ăn gần nhất về người chơi",
-    FOOD_ITEMS,
-    "thức ăn trong map"
-)
-
-buildItemCategoryUI(
-    "NGUYÊN LIỆU SẮT",
-    "⚙️ Quét Nguyên liệu sắt (Bolt, Sheet Metal, Broken Fan...)",
-    "🧲 Kéo Nguyên liệu sắt gần nhất về người chơi",
-    SCRAP_ITEMS,
-    "nguyên liệu sắt trong map"
-)
-
-print("[ollie] v7 loaded ✓")
+print("[ollie] v8 loaded ✓")
