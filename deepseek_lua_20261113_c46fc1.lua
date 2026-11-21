@@ -27,12 +27,6 @@ local WEAPONS = {
     "Scythe","Vampire Scythe","Happy's Scythe",
 }
 
--- Nguyên liệu có thể đốt được — bộ lọc chặt chẽ
-local FUEL_KEYS = {
-    "Log", "Stick", "Branch", "Coal", "Charcoal",
-    "Firewood", "Plank", "Torch", "Fiber",
-}
-
 local CFG = {
     Speed        = false, WalkSpeed   = 40,
     Jump         = false, JumpPower   = 90,
@@ -86,7 +80,7 @@ local function getTool()
             if item:IsA("Model") then return item end
         end
     end
-    return char and char:FindFirstChildWhichIsA("Tool")
+    return char and char:FindFirstChild("Tool")
 end
 
 local function getFirePart()
@@ -361,49 +355,71 @@ local function revealMap()
     end
 end
 
--- ===================== DỒN NGUYÊN LIỆU (có bộ lọc) =====================
+-- ===================== DỒN NGUYÊN LIỆU =====================
+-- Chỉ dồn đúng các loại này, không có bộ lọc phụ
+local FUEL_EXACT = {
+    "Log", "Chair", "Biofuel", "Coal",
+    "Purple Fur Tuft", "Fuel Canister", "Oil Barrel",
+}
+
 local droppedAt = {}
--- Danh sách nguyên liệu được chọn để dồn (người chơi bật/tắt)
-local fuelFilter = {}
-for _, k in ipairs(FUEL_KEYS) do fuelFilter[k] = true end
 
 local function dropScan()
     local fp = getFirePart()
-    if not (fp and DragRE and StopDragRE) then return 0 end
-    local ch, count = LP.Character, 0
+    if not (fp and DragRE and StopDragRE) then
+        warn("[ollie] Thiếu lửa trại hoặc remote kéo thả")
+        return 0
+    end
+
+    local ch    = LP.Character
+    local count = 0
+    local seen  = {}
 
     for _, o in ipairs(Workspace:GetDescendants()) do
-        if o:IsA("Model") then
-            if ch and o:IsDescendantOf(ch) then continue end
-            if Players:GetPlayerFromCharacter(o) then continue end
-            if (droppedAt[o] or 0)+20 > os.clock() then continue end
+        if not o:IsA("Model") then continue end
+        if seen[o] then continue end
+        if ch and o:IsDescendantOf(ch) then continue end
+        if Players:GetPlayerFromCharacter(o) then continue end
+        if (droppedAt[o] or 0) + 20 > os.clock() then continue end
 
-            -- Chỉ dồn những loại trong bộ lọc đang bật
-            local matched = false
-            for key, enabled in pairs(fuelFilter) do
-                if enabled and string.find(string.lower(o.Name), string.lower(key), 1, true) then
-                    matched = true; break
-                end
-            end
-            if not matched then continue end
-
-            if not o.PrimaryPart then pcall(function() o.PrimaryPart=partOf(o) end) end
-            if not o.PrimaryPart then continue end
-
-            droppedAt[o] = os.clock()
-            local offset = Vector3.new(math.random(-25,25)/10, 8+count*0.5, math.random(-25,25)/10)
-            pcall(DragRE.FireServer,  DragRE, o)
-            pcall(function() o:SetPrimaryPartCFrame(CFrame.new(fp.Position+offset)) end)
-            task.wait(0.05)
-            pcall(StopDragRE.FireServer, StopDragRE, o)
-            count+=1; task.wait(0.1)
+        -- Khớp chính xác tên (không dùng find để tránh nhầm)
+        local name = o.Name
+        local matched = false
+        for _, key in ipairs(FUEL_EXACT) do
+            if name == key then matched = true; break end
         end
+        if not matched then continue end
+
+        seen[o] = true
+        if not o.PrimaryPart then
+            pcall(function() o.PrimaryPart = partOf(o) end)
+        end
+        if not o.PrimaryPart then continue end
+
+        droppedAt[o] = os.clock()
+        local offset = Vector3.new(
+            math.random(-20, 20) / 10,
+            8 + count * 0.5,
+            math.random(-20, 20) / 10
+        )
+
+        pcall(DragRE.FireServer,  DragRE, o)
+        pcall(function() o:SetPrimaryPartCFrame(CFrame.new(fp.Position + offset)) end)
+        task.wait(0.05)
+        pcall(StopDragRE.FireServer, StopDragRE, o)
+
+        count += 1
+        task.wait(0.1)
     end
+
     return count
 end
 
 task.spawn(function()
-    while true do task.wait(5); if CFG.AutoDrop then pcall(dropScan) end end
+    while true do
+        task.wait(5)
+        if CFG.AutoDrop then pcall(dropScan) end
+    end
 end)
 
 -- ===================== GUI =====================
@@ -475,7 +491,7 @@ minBtn.MouseButton1Click:Connect(function() panel.Visible=false; fab.Visible=tru
 fab.MouseButton1Click:Connect(function() panel.Visible=true; fab.Visible=false end)
 
 -- Tab bar
-local TAB_NAMES = {"Chính","Slider","Lọc đồ","Trẻ em"}
+local TAB_NAMES = {"Chính","Slider","Trẻ em"}
 local tabs, tabBtns = {}, {}
 local activeTab = 1
 
@@ -691,72 +707,12 @@ slider(t2,"Delay (x10ms)", 1, 30,
     function() return math.floor(CFG.Delay*100) end,
     function(v) CFG.Delay=v/100 end)
 
--- ===================== TAB 3: LỌC ĐỒ =====================
+-- ===================== TAB 3: TRẺ EM =====================
 local t3 = tabs[3]
-section(t3,"CHỌN NGUYÊN LIỆU ĐỂ DỒN")
-
-local filterLabel=Instance.new("TextLabel")
-filterLabel.Size=UDim2.new(0.95,0,0,20); filterLabel.BackgroundTransparency=1
-filterLabel.Text="Chỉ dồn những loại được tích ✓"
-filterLabel.TextColor3=C_SUB; filterLabel.Font=Enum.Font.Gotham
-filterLabel.TextSize=10; filterLabel.TextXAlignment=Enum.TextXAlignment.Left
-filterLabel.Parent=t3
-
-for _, key in ipairs(FUEL_KEYS) do
-    local row=Instance.new("Frame")
-    row.Size=UDim2.new(0.95,0,0,28); row.BackgroundColor3=C_ROW
-    row.BorderSizePixel=0; row.Parent=t3; mkCorner(row,6)
-
-    local lbl=Instance.new("TextLabel")
-    lbl.Size=UDim2.new(1,-50,1,0); lbl.Position=UDim2.new(0,8,0,0)
-    lbl.BackgroundTransparency=1; lbl.Text=key; lbl.TextColor3=C_TXT
-    lbl.Font=Enum.Font.Gotham; lbl.TextSize=11
-    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.Parent=row
-
-    local btn=Instance.new("TextButton")
-    btn.Size=UDim2.new(0,38,0,18); btn.Position=UDim2.new(1,-44,0.5,-9)
-    btn.BorderSizePixel=0; btn.Text=""; btn.Parent=row; mkCorner(btn,9)
-    btn.BackgroundColor3 = fuelFilter[key] and C_ON or C_OFF
-
-    local knob=Instance.new("Frame")
-    knob.Size=UDim2.new(0,14,0,14); knob.AnchorPoint=Vector2.new(0,0.5)
-    knob.BackgroundColor3=Color3.new(1,1,1); knob.BorderSizePixel=0
-    knob.Parent=btn; mkCorner(knob,7)
-    knob.Position = fuelFilter[key] and UDim2.new(1,-16,0.5,0) or UDim2.new(0,2,0.5,0)
-
-    local localKey = key
-    btn.MouseButton1Click:Connect(function()
-        fuelFilter[localKey] = not fuelFilter[localKey]
-        local on = fuelFilter[localKey]
-        btn.BackgroundColor3 = on and C_ON or C_OFF
-        TweenService:Create(knob,TweenInfo.new(0.12),{
-            Position=on and UDim2.new(1,-16,0.5,0) or UDim2.new(0,2,0.5,0)
-        }):Play()
-    end)
-end
-
--- Nút bật/tắt tất cả
-local allRow=Instance.new("Frame")
-allRow.Size=UDim2.new(0.95,0,0,28); allRow.BackgroundColor3=C_HDR
-allRow.BorderSizePixel=0; allRow.Parent=t3; mkCorner(allRow,6)
-local allBtn=Instance.new("TextButton")
-allBtn.Size=UDim2.new(1,0,1,0); allBtn.BackgroundTransparency=1
-allBtn.Text="✅ Bật tất cả  /  ❌ Tắt tất cả"; allBtn.TextColor3=C_BTN
-allBtn.Font=Enum.Font.Gotham; allBtn.TextSize=11; allBtn.Parent=allRow
-local allState=true
-allBtn.MouseButton1Click:Connect(function()
-    allState=not allState
-    for _,k in ipairs(FUEL_KEYS) do fuelFilter[k]=allState end
-    -- Refresh visual: rebuild tab 3 đơn giản bằng cách click từng knob không cần rebuild
-    print("[ollie] Bộ lọc "..(allState and "bật" or "tắt").." tất cả")
-end)
-
--- ===================== TAB 4: TRẺ EM =====================
-local t4 = tabs[4]
 
 local scanTop=Instance.new("Frame")
 scanTop.Size=UDim2.new(0.95,0,0,28); scanTop.BackgroundColor3=C_HDR
-scanTop.BorderSizePixel=0; scanTop.Parent=t4; mkCorner(scanTop,6)
+scanTop.BorderSizePixel=0; scanTop.Parent=t3; mkCorner(scanTop,6)
 local scanLbl=Instance.new("TextLabel")
 scanLbl.Size=UDim2.new(1,-40,1,0); scanLbl.Position=UDim2.new(0,8,0,0)
 scanLbl.BackgroundTransparency=1; scanLbl.Text="Danh sách trẻ em"
@@ -769,7 +725,7 @@ scanBtn.Font=Enum.Font.Gotham; scanBtn.BorderSizePixel=0; scanBtn.Parent=scanTop
 
 local childContainer=Instance.new("Frame")
 childContainer.Size=UDim2.new(0.95,0,0,0); childContainer.AutomaticSize=Enum.AutomaticSize.Y
-childContainer.BackgroundTransparency=1; childContainer.BorderSizePixel=0; childContainer.Parent=t4
+childContainer.BackgroundTransparency=1; childContainer.BorderSizePixel=0; childContainer.Parent=t3
 local childLayout=Instance.new("UIListLayout")
 childLayout.Padding=UDim.new(0,4); childLayout.Parent=childContainer
 
