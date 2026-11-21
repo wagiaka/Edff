@@ -30,6 +30,25 @@ local MELEE_WEAPONS = {
     "Scythe","Vampire Scythe","Happy's Scythe",
 }
 
+local FOOD_ITEMS = {
+    "Berry",
+    "Carrot",
+    "Apple",
+    "Corn",
+    "Pumpkin",
+    "Chili",
+}
+
+local SCRAP_ITEMS = {
+    "Bolt",
+    "Sheet Metal",
+    "Broken Fan",
+    "Broken Radio",
+    "Broken Microwave",
+    "Washing Machine",
+    "Tires & Engines",
+}
+
 local CFG = {
     Speed        = false, WalkSpeed   = 40,
     Jump         = false, JumpPower   = 90,
@@ -40,9 +59,10 @@ local CFG = {
     AutoDrop     = false,
     ESPChild     = false,
     Fullbright   = false,
-    Delay        = 0.15,
+    Delay        = 0.35,
 }
 
+local MAX_KILL_PER_CYCLE = 6
 local TOOL_SUFFIX = "11960515286"
 local CHILD_KEY   = "Lost Child"
 
@@ -51,6 +71,13 @@ local function hasKey(name, keys)
     local n = string.lower(name)
     for _, k in ipairs(keys) do
         if string.find(n, string.lower(k), 1, true) then return true end
+    end
+    return false
+end
+
+local function matchesExact(name, list)
+    for _, itemName in ipairs(list) do
+        if name == itemName then return true end
     end
     return false
 end
@@ -66,7 +93,50 @@ end
 local function partOf(m)
     if not m then return nil end
     if m:IsA("BasePart") then return m end
+    if m:IsA("Model") and m.PrimaryPart then return m.PrimaryPart end
+    local hrp = m:FindFirstChild("HumanoidRootPart")
+    if hrp and hrp:IsA("BasePart") then return hrp end
     return m:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function moveObjectToCFrame(obj, targetCF)
+    if not obj or not obj.Parent then return false end
+    if obj:IsA("BasePart") then
+        obj.CFrame = targetCF
+        return true
+    elseif obj:IsA("Model") then
+        if not obj.PrimaryPart then
+            local p = partOf(obj)
+            if p then pcall(function() obj.PrimaryPart = p end) end
+        end
+        if obj.PrimaryPart then
+            pcall(function() obj:SetPrimaryPartCFrame(targetCF) end)
+            return true
+        else
+            pcall(function() obj:PivotTo(targetCF) end)
+            return true
+        end
+    end
+    return false
+end
+
+local function bringToPlayer(obj, indexOffset)
+    local r = root()
+    if not r or not obj or not obj.Parent then return false end
+    local idx = indexOffset or 0
+    local spreadX = ((idx % 3) - 1) * 1.4
+    local liftY = 1.2 + math.floor(idx / 3) * 0.6
+    local goalCF = r.CFrame * CFrame.new(spreadX, liftY, -4)
+
+    if DragRE and StopDragRE then
+        pcall(DragRE.FireServer, DragRE, obj)
+        moveObjectToCFrame(obj, goalCF)
+        task.wait(0.04)
+        pcall(StopDragRE.FireServer, StopDragRE, obj)
+        return true
+    end
+
+    return moveObjectToCFrame(obj, goalCF)
 end
 
 local function findFromList(list, inv, char)
@@ -134,7 +204,7 @@ task.spawn(function()
             end
         end
         childCache = out
-        task.wait(1)
+        task.wait(1.5)
     end
 end)
 
@@ -163,9 +233,9 @@ end
 local function swing(tool, target, p)
     if not (EquipRE and UnequipRE and DamageRF) then return false end
     pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
-    task.wait(0.02)
+    task.wait(0.03)
     local ok = hitOnce(tool, target, p)
-    task.wait(0.015)
+    task.wait(0.025)
     pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
     return ok
 end
@@ -173,23 +243,31 @@ end
 local function swingBatch(tool, targets)
     if not (EquipRE and UnequipRE and DamageRF) or #targets == 0 then return end
     pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
-    task.wait(0.015)
-    for _, t in ipairs(targets) do
+    task.wait(0.03)
+    local limit = math.min(#targets, MAX_KILL_PER_CYCLE)
+    for i = 1, limit do
         if not CFG.KillAura then break end
+        local t = targets[i]
         if t.m and t.m.Parent and t.p and t.p.Parent then
-            hitOnce(tool, t.m, t.p)
+            local h = t.m:FindFirstChildWhichIsA("Humanoid", true)
+            if h and h.Health > 0 then
+                hitOnce(tool, t.m, t.p)
+            end
         end
-        task.wait(0.015)
+        if i < limit then
+            task.wait(0.05)
+        end
     end
     pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
 end
 
 -- ===================== KILL AURA =====================
-local SCAN_FOLDERS = {"Characters","Map","Enemies","Mobs","NPCs"}
+local SCAN_FOLDERS = {"Characters","Enemies","Mobs","NPCs"}
 local function getAnimals(r)
     local out, ch, seen = {}, LP.Character, {}
     local maxDistSq = CFG.KillRadius * CFG.KillRadius
     local rPos = r.Position
+
     local function tryAdd(o)
         if seen[o] or o==ch then return end
         seen[o] = true
@@ -204,17 +282,19 @@ local function getAnimals(r)
             table.insert(out, {m=o, p=p, dSq=dSq})
         end
     end
+
     for _, o in ipairs(Workspace:GetChildren()) do
         if o:IsA("Model") then tryAdd(o) end
     end
     for _, fn in ipairs(SCAN_FOLDERS) do
         local folder = Workspace:FindFirstChild(fn)
         if folder then
-            for _, o in ipairs(folder:GetDescendants()) do
+            for _, o in ipairs(folder:GetChildren()) do
                 if o:IsA("Model") then tryAdd(o) end
             end
         end
     end
+
     table.sort(out, function(a,b) return a.dSq<b.dSq end)
     return out
 end
@@ -225,40 +305,50 @@ local TREE_KEYS = {"Tree","Pine","Oak","Birch","Fir","Bush","Foliage"}
 
 local function getTrees(r)
     local out = {}
+    local maxDistSq = CFG.ChopRadius * CFG.ChopRadius
+    local rPos = r.Position
+    local now = os.clock()
+
     local function scanFolder(folder)
         if not folder then return end
         for _, t in ipairs(folder:GetChildren()) do
-            if not (skipTree[t] and os.clock()<skipTree[t]) then
+            if not (skipTree[t] and now < skipTree[t]) then
                 local p = partOf(t)
                 if p then
-                    local d = (p.Position - r.Position).Magnitude
-                    if d <= CFG.ChopRadius then
-                        table.insert(out, {m=t, p=p, d=d})
+                    local delta = p.Position - rPos
+                    local dSq = delta.X*delta.X + delta.Y*delta.Y + delta.Z*delta.Z
+                    if dSq <= maxDistSq then
+                        table.insert(out, {m=t, p=p, dSq=dSq})
                     end
                 end
             end
         end
     end
+
     local map = Workspace:FindFirstChild("Map")
     scanFolder(map and map:FindFirstChild("Foliage"))
     scanFolder(map and map:FindFirstChild("Trees"))
     scanFolder(Workspace:FindFirstChild("Foliage"))
     scanFolder(Workspace:FindFirstChild("Trees"))
+
     if #out == 0 then
-        for _, o in ipairs(Workspace:GetDescendants()) do
+        local scanRoot = map or Workspace
+        for _, o in ipairs(scanRoot:GetDescendants()) do
             if o:IsA("Model") and hasKey(o.Name, TREE_KEYS)
-                and not (skipTree[o] and os.clock()<skipTree[o]) then
+                and not (skipTree[o] and now < skipTree[o]) then
                 local p = partOf(o)
                 if p then
-                    local d = (p.Position - r.Position).Magnitude
-                    if d <= CFG.ChopRadius then
-                        table.insert(out, {m=o, p=p, d=d})
+                    local delta = p.Position - rPos
+                    local dSq = delta.X*delta.X + delta.Y*delta.Y + delta.Z*delta.Z
+                    if dSq <= maxDistSq then
+                        table.insert(out, {m=o, p=p, dSq=dSq})
                     end
                 end
             end
         end
     end
-    table.sort(out, function(a,b) return a.d<b.d end)
+
+    table.sort(out, function(a,b) return a.dSq<b.dSq end)
     return out
 end
 
@@ -282,7 +372,7 @@ task.spawn(function()
                 if #trees > 0 then
                     local t = trees[1]
                     local ok = swing(tool, t.m, t.p)
-                    if ok then skipTree[t.m] = os.clock()+2.5 end
+                    skipTree[t.m] = os.clock() + (ok and 3.0 or 1.5)
                 end
             end
         end
@@ -414,7 +504,7 @@ task.spawn(function()
     end
 end)
 
--- ===================== TP =====================
+-- ===================== TP & KÉO ĐỒ VỀ NGƯỜI CHƠI =====================
 local function tpTo(m)
     local r,p = root(), partOf(m)
     if r and p then r.CFrame=CFrame.new(p.Position+Vector3.new(0,4,0)) end
@@ -422,6 +512,48 @@ end
 local function tpCampfire()
     local fp=getFirePart(); local r=root()
     if fp and r then r.CFrame=CFrame.new(fp.Position+Vector3.new(0,4,0)) end
+end
+
+local function pullPlayerToMe(plr)
+    if not plr or plr == LP then return false end
+    local r = root()
+    local targetRoot = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+    if r and targetRoot then
+        targetRoot.CFrame = r.CFrame * CFrame.new(0, 1, -4)
+        return true
+    end
+    return false
+end
+
+local function scanExactItems(nameList)
+    local r = root()
+    local rPos = r and r.Position
+    local ch = LP.Character
+    local out = {}
+    local seen = {}
+
+    for _, o in ipairs(Workspace:GetDescendants()) do
+        if seen[o] then continue end
+        if ch and o:IsDescendantOf(ch) then continue end
+        if o:IsA("Model") or o:IsA("BasePart") then
+            if matchesExact(o.Name, nameList) then
+                seen[o] = true
+                local p = partOf(o)
+                if p then
+                    local dist = rPos and math.floor((p.Position - rPos).Magnitude) or 0
+                    table.insert(out, {
+                        obj = o,
+                        name = o.Name,
+                        part = p,
+                        dist = dist,
+                    })
+                end
+            end
+        end
+    end
+
+    table.sort(out, function(a, b) return a.dist < b.dist end)
+    return out
 end
 
 -- ===================== REVEAL MAP =====================
@@ -690,7 +822,7 @@ minBtn.MouseButton1Click:Connect(function() panel.Visible=false; fab.Visible=tru
 fab.MouseButton1Click:Connect(function() panel.Visible=true; fab.Visible=false end)
 
 -- Tab bar
-local TAB_NAMES = {"Chính","Slider","Trẻ em"}
+local TAB_NAMES = {"Chính","Slider","Trẻ em","TP & Đồ"}
 local tabs, tabBtns = {}, {}
 local activeTab = 1
 
@@ -912,7 +1044,7 @@ slider(t2,"Kill Radius",  10, 500, function() return CFG.KillRadius  end, functi
 slider(t2,"Chop Radius",  10, 500, function() return CFG.ChopRadius  end, function(v) CFG.ChopRadius=v  end)
 
 section(t2,"TỐC ĐỘ ĐÁNH")
-slider(t2,"Delay (x10ms)", 1, 30,
+slider(t2,"Delay (x10ms)", 5, 60,
     function() return math.floor(CFG.Delay*100) end,
     function(v) CFG.Delay=v/100 end)
 
@@ -989,5 +1121,185 @@ local function populateChildren()
     end
 end
 scanBtn.MouseButton1Click:Connect(populateChildren)
+
+-- ===================== TAB 4: TP & ĐỒ =====================
+local t4 = tabs[4]
+
+section(t4, "NGƯỜI CHƠI (KÉO VỀ VỊ TRÍ BẠN)")
+local plrListContainer = Instance.new("Frame")
+plrListContainer.Size = UDim2.new(0.95, 0, 0, 0)
+plrListContainer.AutomaticSize = Enum.AutomaticSize.Y
+plrListContainer.BackgroundTransparency = 1
+plrListContainer.BorderSizePixel = 0
+plrListContainer.Parent = t4
+local plrLayout = Instance.new("UIListLayout")
+plrLayout.Padding = UDim.new(0, 4)
+plrLayout.Parent = plrListContainer
+
+local function refreshPlayers()
+    for _, c in ipairs(plrListContainer:GetChildren()) do
+        if c:IsA("GuiObject") then c:Destroy() end
+    end
+    local r = root()
+    local others = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP then
+            local pRoot = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+            local dist = (r and pRoot) and math.floor((pRoot.Position - r.Position).Magnitude) or 0
+            table.insert(others, {plr = plr, dist = dist, hasChar = pRoot ~= nil})
+        end
+    end
+    table.sort(others, function(a, b) return a.dist < b.dist end)
+    if #others == 0 then
+        local empty = Instance.new("TextLabel")
+        empty.Size = UDim2.new(1, 0, 0, 22)
+        empty.BackgroundTransparency = 1
+        empty.Text = "Không có người chơi khác trong map"
+        empty.TextColor3 = C_SUB
+        empty.Font = Enum.Font.Gotham
+        empty.TextSize = 10
+        empty.Parent = plrListContainer
+        return
+    end
+    for _, info in ipairs(others) do
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, -4, 0, 32)
+        row.BackgroundColor3 = C_ROW
+        row.BorderSizePixel = 0
+        row.Parent = plrListContainer
+        mkCorner(row, 6)
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, -56, 1, 0)
+        lbl.Position = UDim2.new(0, 8, 0, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = info.hasChar and string.format("%s (%d studs)", info.plr.Name, info.dist) or (info.plr.Name .. " (chờ spawn)")
+        lbl.TextColor3 = C_TXT
+        lbl.Font = Enum.Font.Gotham
+        lbl.TextSize = 11
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.TextTruncate = Enum.TextTruncate.AtEnd
+        lbl.Parent = row
+
+        local goBtn = Instance.new("TextButton")
+        goBtn.Size = UDim2.new(0, 44, 0, 20)
+        goBtn.Position = UDim2.new(1, -50, 0.5, -10)
+        goBtn.BackgroundColor3 = info.hasChar and C_ON or C_OFF
+        goBtn.BorderSizePixel = 0
+        goBtn.Text = "Kéo về"
+        goBtn.TextColor3 = Color3.new(1, 1, 1)
+        goBtn.Font = Enum.Font.GothamBold
+        goBtn.TextSize = 10
+        goBtn.Parent = row
+        mkCorner(goBtn, 5)
+        goBtn.MouseButton1Click:Connect(function() pullPlayerToMe(info.plr) end)
+    end
+end
+
+button(t4, "🔄 Làm mới danh sách người chơi", refreshPlayers)
+refreshPlayers()
+
+local function buildItemCategoryUI(titleText, scanBtnText, pullAllText, itemList, emptyLabel)
+    section(t4, titleText)
+
+    local listContainer = Instance.new("Frame")
+    listContainer.Size = UDim2.new(0.95, 0, 0, 0)
+    listContainer.AutomaticSize = Enum.AutomaticSize.Y
+    listContainer.BackgroundTransparency = 1
+    listContainer.BorderSizePixel = 0
+    listContainer.Parent = t4
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 4)
+    layout.Parent = listContainer
+
+    local latestItems = {}
+
+    local function renderList()
+        for _, c in ipairs(listContainer:GetChildren()) do
+            if c:IsA("GuiObject") then c:Destroy() end
+        end
+        if #latestItems == 0 then
+            local empty = Instance.new("TextLabel")
+            empty.Size = UDim2.new(1, 0, 0, 24)
+            empty.BackgroundTransparency = 1
+            empty.Text = "Không tìm thấy " .. emptyLabel
+            empty.TextColor3 = C_SUB
+            empty.Font = Enum.Font.Gotham
+            empty.TextSize = 11
+            empty.Parent = listContainer
+            return
+        end
+        local maxShow = math.min(#latestItems, 20)
+        for i = 1, maxShow do
+            local entry = latestItems[i]
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, -4, 0, 34)
+            row.BackgroundColor3 = C_ROW
+            row.BorderSizePixel = 0
+            row.Parent = listContainer
+            mkCorner(row, 6)
+
+            local nameLbl = Instance.new("TextLabel")
+            nameLbl.Size = UDim2.new(1, -56, 1, 0)
+            nameLbl.Position = UDim2.new(0, 8, 0, 0)
+            nameLbl.BackgroundTransparency = 1
+            nameLbl.Text = string.format("%d. %s · %d studs", i, entry.name, entry.dist)
+            nameLbl.TextColor3 = C_TXT
+            nameLbl.Font = Enum.Font.Gotham
+            nameLbl.TextSize = 11
+            nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+            nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+            nameLbl.Parent = row
+
+            local pullBtn = Instance.new("TextButton")
+            pullBtn.Size = UDim2.new(0, 44, 0, 20)
+            pullBtn.Position = UDim2.new(1, -50, 0.5, -10)
+            pullBtn.BackgroundColor3 = C_ON
+            pullBtn.BorderSizePixel = 0
+            pullBtn.Text = "Kéo về"
+            pullBtn.TextColor3 = Color3.new(1, 1, 1)
+            pullBtn.Font = Enum.Font.GothamBold
+            pullBtn.TextSize = 10
+            pullBtn.Parent = row
+            mkCorner(pullBtn, 5)
+            pullBtn.MouseButton1Click:Connect(function()
+                bringToPlayer(entry.obj, i - 1)
+            end)
+        end
+    end
+
+    button(t4, scanBtnText, function()
+        latestItems = scanExactItems(itemList)
+        renderList()
+    end)
+
+    button(t4, pullAllText, function()
+        task.spawn(function()
+            latestItems = scanExactItems(itemList)
+            local limit = math.min(#latestItems, 12)
+            for i = 1, limit do
+                bringToPlayer(latestItems[i].obj, i - 1)
+                task.wait(0.06)
+            end
+            renderList()
+        end)
+    end)
+end
+
+buildItemCategoryUI(
+    "THỨC ĂN",
+    "🍎 Quét Thức ăn (Berry, Carrot, Apple, Corn, Pumpkin, Chili)",
+    "🧺 Kéo Thức ăn gần nhất về người chơi",
+    FOOD_ITEMS,
+    "thức ăn trong map"
+)
+
+buildItemCategoryUI(
+    "NGUYÊN LIỆU SẮT",
+    "⚙️ Quét Nguyên liệu sắt (Bolt, Sheet Metal, Broken Fan...)",
+    "🧲 Kéo Nguyên liệu sắt gần nhất về người chơi",
+    SCRAP_ITEMS,
+    "nguyên liệu sắt trong map"
+)
 
 print("[ollie] v7 loaded ✓")
