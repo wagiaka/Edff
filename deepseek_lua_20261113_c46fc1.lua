@@ -19,7 +19,7 @@ local DragRE     = Remotes and Remotes:FindFirstChild("RequestStartDraggingItem"
 local StopDragRE = Remotes and Remotes:FindFirstChild("StopDraggingItem")
 local HitSoundRE = Remotes and Remotes:FindFirstChild("PlayEnemyHitSound")
 local PlantRE    = Remotes and Remotes:FindFirstChild("RequestPlantItem")
-local EatSoundRE = Remotes and Remotes:FindFirstChild("RequestReplicateSound")
+local ConsumeRF  = Remotes and Remotes:FindFirstChild("RequestConsumeItem")
 
 local AXES = {
     "Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
@@ -59,19 +59,14 @@ local TOOL_SUFFIX = "11960515286"
 local CHILD_KEY   = "Lost Child"
 local GUI_NAME    = "ollie_v9"
 
--- =================== XOÁ MENU CŨ (tính năng ẩn) ===================
--- Chạy âm thầm khi load, xoá mọi menu trùng tên
+-- =================== XOÁ MENU CŨ ===================
 local function clearOldMenus()
     for _, v in ipairs(PlayerGui:GetChildren()) do
-        if v:IsA("ScreenGui") and v.Name == GUI_NAME then
-            v:Destroy()
-        end
+        if v:IsA("ScreenGui") and v.Name == GUI_NAME then v:Destroy() end
     end
     pcall(function()
         for _, v in ipairs(game:GetService("CoreGui"):GetChildren()) do
-            if v:IsA("ScreenGui") and v.Name == GUI_NAME then
-                v:Destroy()
-            end
+            if v:IsA("ScreenGui") and v.Name == GUI_NAME then v:Destroy() end
         end
     end)
 end
@@ -153,7 +148,7 @@ local function getFirePart()
     end
 end
 
--- Lấy nil instances theo tên
+-- Quét nil instances theo tên
 local function getNilByName(name)
     local out = {}
     if not getnilinstances then return out end
@@ -398,22 +393,16 @@ function startFly()
     stopFly()
     local r, h = root(), hum(); if not (r and h) then return end
     h.PlatformStand = true
-
     flyBV = Instance.new("BodyVelocity")
     flyBV.MaxForce = Vector3.new(1e6,1e6,1e6)
-    flyBV.Velocity = Vector3.zero
-    flyBV.Parent   = r
-
+    flyBV.Velocity = Vector3.zero; flyBV.Parent = r
     flyBG = Instance.new("BodyGyro")
     flyBG.MaxTorque = Vector3.new(1e6,1e6,1e6)
-    flyBG.P = 1e4
-    flyBG.Parent = r
-
+    flyBG.P = 1e4; flyBG.Parent = r
     flyConn = RunService.Heartbeat:Connect(function()
         local cam = Workspace.CurrentCamera
         local rr, hh = root(), hum()
         if not (cam and rr and hh and flyBV and flyBV.Parent) then return end
-
         local md = hh.MoveDirection
         local camLook  = cam.CFrame.LookVector
         local camRight = cam.CFrame.RightVector
@@ -421,12 +410,10 @@ function startFly()
         local flatRight = Vector3.new(camRight.X, 0, camRight.Z)
         if flatLook.Magnitude  > 0 then flatLook  = flatLook.Unit  end
         if flatRight.Magnitude > 0 then flatRight = flatRight.Unit end
-
         local moveDir = flatLook * (-md.Z) + flatRight * md.X
         local vy = 0
         if UIS:IsKeyDown(Enum.KeyCode.Space)       or padUp   then vy =  1 end
         if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or padDown then vy = -1 end
-
         flyBV.Velocity = moveDir * CFG.FlySpeed + Vector3.new(0, vy * CFG.FlySpeed, 0)
         flyBG.CFrame   = CFrame.new(rr.Position, rr.Position + flatLook)
     end)
@@ -462,35 +449,50 @@ local function setFullbright(on)
 end
 
 -- =================== AUTO EAT CARROT ===================
-local function eatOne(carrot)
-    if not (DragRE and StopDragRE) then return false end
-    local char = LP.Character; if not char then return false end
-    local head = char:FindFirstChild("Head"); if not head then return false end
-
-    pcall(DragRE.FireServer,  DragRE, carrot)
-    task.wait(0.1)
-    pcall(StopDragRE.FireServer, StopDragRE, carrot)
-    task.wait(0.05)
-
-    if EatSoundRE then
-        pcall(EatSoundRE.FireServer, EatSoundRE,
-            "FireAllClients", "Eat",
-            { Instance = head, Volume = 0.15 }
-        )
-    end
-    return true
-end
+-- Dùng đúng remote từ capture: RequestConsumeItem:InvokeServer(carrot)
+local eatStatusLbl -- gán sau khi tạo GUI
 
 task.spawn(function()
     while true do
         task.wait(2)
         if CFG.AutoEat then
-            local carrots = getNilByName("Carrot")
-            if #carrots > 0 then
-                local ok = pcall(eatOne, carrots[1])
-                if ok then
-                    print("[ollie] Đã ăn carrot (" .. #carrots .. " còn lại)")
+            if not ConsumeRF then
+                if eatStatusLbl then
+                    eatStatusLbl.Text = "❌ Thiếu remote RequestConsumeItem"
+                    eatStatusLbl.TextColor3 = Color3.fromRGB(255,100,100)
                 end
+                continue
+            end
+            if not getnilinstances then
+                if eatStatusLbl then
+                    eatStatusLbl.Text = "❌ Executor không hỗ trợ getnilinstances"
+                    eatStatusLbl.TextColor3 = Color3.fromRGB(255,100,100)
+                end
+                continue
+            end
+
+            local carrots = getNilByName("Carrot")
+            if #carrots == 0 then
+                if eatStatusLbl then
+                    eatStatusLbl.Text = "⚠️ Không tìm thấy Carrot"
+                    eatStatusLbl.TextColor3 = Color3.fromRGB(255,180,60)
+                end
+                continue
+            end
+
+            -- Ăn từng carrot cho đến khi hết hoặc tắt
+            local ate = 0
+            for _, carrot in ipairs(carrots) do
+                if not CFG.AutoEat then break end
+                local ok, _ = pcall(ConsumeRF.InvokeServer, ConsumeRF, carrot)
+                if ok then
+                    ate += 1
+                    if eatStatusLbl then
+                        eatStatusLbl.Text = string.format("✅ Đã ăn %d carrot", ate)
+                        eatStatusLbl.TextColor3 = Color3.fromRGB(75,190,115)
+                    end
+                end
+                task.wait(0.3)
             end
         end
     end
@@ -526,7 +528,6 @@ task.spawn(function()
                     hl.OutlineColor     = Color3.fromRGB(255,220,80)
                     hl.FillTransparency = 0.45
                     hl.Adornee = m; hl.Parent = m
-
                     local adornPart = partOf(m)
                     local bb, lblConn
                     if adornPart then
@@ -534,9 +535,7 @@ task.spawn(function()
                         bb.Adornee     = adornPart
                         bb.Size        = UDim2.new(0,160,0,44)
                         bb.StudsOffset = Vector3.new(0,3,0)
-                        bb.AlwaysOnTop = true
-                        bb.Parent      = adornPart
-
+                        bb.AlwaysOnTop = true; bb.Parent = adornPart
                         local lbl = Instance.new("TextLabel")
                         lbl.Size               = UDim2.new(1,0,1,0)
                         lbl.BackgroundTransparency = 1
@@ -544,15 +543,12 @@ task.spawn(function()
                         lbl.TextStrokeColor3   = Color3.new(0,0,0)
                         lbl.TextStrokeTransparency = 0.3
                         lbl.Font               = Enum.Font.GothamBold
-                        lbl.TextSize           = 14
-                        lbl.Parent             = bb
-
+                        lbl.TextSize           = 14; lbl.Parent = bb
                         lblConn = RunService.Heartbeat:Connect(function()
                             if not m.Parent or not CFG.ESPChild then
                                 lblConn:Disconnect(); return
                             end
-                            local rr = root()
-                            local pp = partOf(m)
+                            local rr = root(); local pp = partOf(m)
                             if rr and pp then
                                 local dist = math.floor((pp.Position - rr.Position).Magnitude)
                                 lbl.Text = m.Name .. "\n📍 " .. dist .. " studs"
@@ -597,7 +593,6 @@ local function pullAllExact(nameList)
     local r = root(); if not r then return 0 end
     local ch = LP.Character
     local found = {}
-
     for _, o in ipairs(Workspace:GetDescendants()) do
         if ch and o:IsDescendantOf(ch) then continue end
         if Players:GetPlayerFromCharacter(o) then continue end
@@ -609,19 +604,15 @@ local function pullAllExact(nameList)
             end
         end
     end
-
     table.sort(found, function(a,b) return a.dist < b.dist end)
     local count = 0
-
     for i = 1, math.min(#found, 20) do
         if not (DragRE and StopDragRE) then break end
         local o  = found[i].obj
         local rr = root(); if not rr then break end
-
         local spreadX = ((count % 3) - 1) * 1.4
         local liftY   = 1.2 + math.floor(count / 3) * 0.6
         local goalCF  = rr.CFrame * CFrame.new(spreadX, liftY, -3)
-
         if o:IsA("Model") then
             if not o.PrimaryPart then
                 pcall(function() o.PrimaryPart = partOf(o) end)
@@ -636,11 +627,9 @@ local function pullAllExact(nameList)
             pcall(DragRE.FireServer, DragRE, o)
             pcall(function() o.CFrame = goalCF end)
         end
-
         task.wait(0.04)
         pcall(StopDragRE.FireServer, StopDragRE, o)
-        count += 1
-        task.wait(0.08)
+        count += 1; task.wait(0.08)
     end
     return count
 end
@@ -651,7 +640,6 @@ local function dumpFuelToFire()
     local fp = getFirePart()
     if not (fp and DragRE and StopDragRE) then return 0 end
     local ch, count, seen = LP.Character, 0, {}
-
     for _, o in ipairs(Workspace:GetDescendants()) do
         if not o:IsA("Model") then continue end
         if seen[o] then continue end
@@ -659,23 +647,16 @@ local function dumpFuelToFire()
         if Players:GetPlayerFromCharacter(o) then continue end
         if (droppedAt[o] or 0) + 20 > os.clock() then continue end
         if not matchesExact(o.Name, FUEL_EXACT) then continue end
-
         seen[o] = true
         if not o.PrimaryPart then pcall(function() o.PrimaryPart = partOf(o) end) end
         if not o.PrimaryPart then continue end
-
         droppedAt[o] = os.clock()
-        local offset = Vector3.new(
-            math.random(-20,20)/10,
-            7 + count * 0.4,
-            math.random(-20,20)/10
-        )
+        local offset = Vector3.new(math.random(-20,20)/10, 7+count*0.4, math.random(-20,20)/10)
         pcall(DragRE.FireServer,  DragRE, o)
         pcall(function() o:SetPrimaryPartCFrame(CFrame.new(fp.Position + offset)) end)
         task.wait(0.05)
         pcall(StopDragRE.FireServer, StopDragRE, o)
-        count += 1
-        task.wait(0.1)
+        count += 1; task.wait(0.1)
     end
     return count
 end
@@ -696,53 +677,33 @@ local function plantAllSaplings(statusLbl)
         end
         print("[ollie] " .. txt)
     end
-
     if not PlantRE then
-        setStatus("❌ Không có remote RequestPlantItem", Color3.fromRGB(255,100,100))
-        return 0
+        setStatus("❌ Không có remote RequestPlantItem", Color3.fromRGB(255,100,100)); return 0
     end
     if not getnilinstances then
-        setStatus("❌ Executor không hỗ trợ getnilinstances", Color3.fromRGB(255,100,100))
-        return 0
+        setStatus("❌ Executor không hỗ trợ getnilinstances", Color3.fromRGB(255,100,100)); return 0
     end
-
     setStatus("🔍 Đang quét mầm cây...", Color3.fromRGB(255,220,80))
     local saplings = getNilByName("Sapling")
-
     if #saplings == 0 then
-        setStatus("⚠️ Không tìm thấy mầm cây nào", Color3.fromRGB(255,180,60))
-        return 0
+        setStatus("⚠️ Không tìm thấy mầm cây nào", Color3.fromRGB(255,180,60)); return 0
     end
-
     setStatus(string.format("🌱 Tìm thấy %d mầm — đang trồng...", #saplings), Color3.fromRGB(105,220,160))
-
     local r = root()
     if not r then
-        setStatus("❌ Không tìm thấy nhân vật", Color3.fromRGB(255,100,100))
-        return 0
+        setStatus("❌ Không tìm thấy nhân vật", Color3.fromRGB(255,100,100)); return 0
     end
-
     local basePos = r.CFrame.Position - Vector3.new(0, 3, 0)
     local count = 0
-
     for _, sapling in ipairs(saplings) do
         local ok0, _ = pcall(function() return sapling.Name end)
         if not ok0 then continue end
-
-        local offset = Vector3.new(
-            math.random(-3,3) / 10, 0,
-            math.random(-3,3) / 10
-        )
-        local plantPos = basePos + offset
-
-        local ok2 = pcall(PlantRE.InvokeServer, PlantRE, sapling, plantPos)
-        if StopDragRE then
-            pcall(StopDragRE.FireServer, StopDragRE, sapling)
-        end
+        local offset = Vector3.new(math.random(-3,3)/10, 0, math.random(-3,3)/10)
+        local ok2 = pcall(PlantRE.InvokeServer, PlantRE, sapling, basePos + offset)
+        if StopDragRE then pcall(StopDragRE.FireServer, StopDragRE, sapling) end
         if ok2 then count += 1 end
         task.wait(0.15)
     end
-
     if count > 0 then
         setStatus(string.format("✅ Đã trồng %d/%d mầm cây", count, #saplings), Color3.fromRGB(75,190,115))
     else
@@ -869,9 +830,7 @@ local function makeDraggable(handle, target)
     end)
     handle.InputEnded:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1
-        or i.UserInputType == Enum.UserInputType.Touch then
-            drag = false
-        end
+        or i.UserInputType == Enum.UserInputType.Touch then drag = false end
     end)
     UIS.InputChanged:Connect(function(i)
         if not drag then return end
@@ -942,7 +901,6 @@ for i, name in ipairs(TAB_NAMES) do
     l.HorizontalAlignment = Enum.HorizontalAlignment.Center; l.Parent = sf
     local p = Instance.new("UIPadding"); p.PaddingTop = UDim.new(0,4); p.Parent = sf
     tabs[i] = sf
-
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(0,0,1,0); btn.AutomaticSize = Enum.AutomaticSize.X
     btn.BackgroundColor3 = (i==1) and C_ON or C_OFF
@@ -998,6 +956,19 @@ local function section(parent, text)
     l.BackgroundTransparency = 1; l.Text = text; l.TextColor3 = C_ACC
     l.Font = Enum.Font.GothamBold; l.TextSize = 10
     l.TextXAlignment = Enum.TextXAlignment.Left; l.Parent = f
+end
+
+local function statusRow(parent, defaultText)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(0.95,0,0,24); f.BackgroundColor3 = C_HDR
+    f.BorderSizePixel = 0; f.Parent = parent; mkCorner(f, 5)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1,-8,1,0); l.Position = UDim2.new(0,8,0,0)
+    l.BackgroundTransparency = 1; l.Text = defaultText or ""
+    l.TextColor3 = C_SUB; l.Font = Enum.Font.Gotham; l.TextSize = 10
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.TextTruncate = Enum.TextTruncate.AtEnd; l.Parent = f
+    return l
 end
 
 local function slider(parent, label, minV, maxV, getV, setV)
@@ -1107,10 +1078,20 @@ toggle(t1, "Kill Aura",  function() return CFG.KillAura   end, function(v) CFG.K
 toggle(t1, "Auto Chop",  function() return CFG.AutoChop   end, function(v) CFG.AutoChop = v end)
 
 section(t1, "UTILITY")
-toggle(t1, "ESP Trẻ",        function() return CFG.ESPChild end, function(v)
+toggle(t1, "ESP Trẻ", function() return CFG.ESPChild end, function(v)
     CFG.ESPChild = v; if not v then clearESPChild() end
 end)
-toggle(t1, "🥕 Auto Eat Carrot", function() return CFG.AutoEat end, function(v) CFG.AutoEat = v end)
+
+-- Auto Eat Carrot + status
+toggle(t1, "🥕 Auto Eat Carrot", function() return CFG.AutoEat end, function(v)
+    CFG.AutoEat = v
+    if not v and eatStatusLbl then
+        eatStatusLbl.Text      = "Tắt"
+        eatStatusLbl.TextColor3 = C_SUB
+    end
+end)
+eatStatusLbl = statusRow(t1, "Chờ bật để ăn carrot tự động...")
+
 toggle(t1, "Auto dồn nhiên liệu → Lửa trại",
     function() return CFG.AutoDrop end, function(v) CFG.AutoDrop = v end)
 
@@ -1124,22 +1105,7 @@ end)
 button(t1, "🗺️ Reveal map", function() task.spawn(revealMap) end)
 
 section(t1, "TRỒNG CÂY")
-local plantStatusRow = Instance.new("Frame")
-plantStatusRow.Size = UDim2.new(0.95,0,0,24)
-plantStatusRow.BackgroundColor3 = C_HDR
-plantStatusRow.BorderSizePixel = 0
-plantStatusRow.Parent = t1; mkCorner(plantStatusRow, 5)
-local plantStatusLbl = Instance.new("TextLabel")
-plantStatusLbl.Size = UDim2.new(1,-8,1,0)
-plantStatusLbl.Position = UDim2.new(0,8,0,0)
-plantStatusLbl.BackgroundTransparency = 1
-plantStatusLbl.Text = "Đứng vào vị trí muốn trồng → bấm nút"
-plantStatusLbl.TextColor3 = C_SUB
-plantStatusLbl.Font = Enum.Font.Gotham; plantStatusLbl.TextSize = 10
-plantStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
-plantStatusLbl.TextTruncate = Enum.TextTruncate.AtEnd
-plantStatusLbl.Parent = plantStatusRow
-
+local plantStatusLbl = statusRow(t1, "Đứng vào vị trí muốn trồng → bấm nút")
 button(t1, "🌱 Trồng tất cả mầm cây (Sapling)", function()
     task.spawn(function() plantAllSaplings(plantStatusLbl) end)
 end)
