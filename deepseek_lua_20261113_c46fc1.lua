@@ -1,6 +1,6 @@
 --========================================================
 -- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & OPTIMIZED)
--- TP Auto Chop (Break-to-Switch + Exact Tree Name Filter)
+-- TP Auto Chop (Exact Tree Name Filter + Anti-Lose Axe Fix)
 -- Independent Kill Aura + Conflict Warning | Auto Rescue Children
 -- Cached Chest + Ammo + Coins | Zero-Lag Mobile Ready
 --========================================================
@@ -946,15 +946,17 @@ task.spawn(function()
 end)
 
 --========================================================
--- COUNTER, KILL AURA & TP AUTO CHOP (EXACT TREE NAMES)
+-- COUNTER, KILL AURA & TP AUTO CHOP (EXACT TREE NAMES + ANTI-LOSE AXE FIX)
 --========================================================
 
 local hitCounter = 0
 local lastEquippedChopTool = nil
+local isChoppingNow = false
 
 local function resetCounter()
 	hitCounter = 0
 	lastEquippedChopTool = nil
+	isChoppingNow = false
 end
 
 Workspace.ChildAdded:Connect(function(c)
@@ -985,10 +987,23 @@ local function fireWoodChopSound()
 	end
 end
 
+local function isToolValid(tool)
+	if not tool or not tool.Parent then return false end
+	local inv = Player:FindFirstChild("Inventory")
+	local char = Player.Character
+	return (inv and tool:IsDescendantOf(inv)) or (char and tool:IsDescendantOf(char))
+end
+
+local function isToolEquippedOnChar(tool)
+	local char = Player.Character
+	return char and tool and tool.Parent == char
+end
+
 local function hitOnce(tool, target, p)
 	if not DamageRF or not target or not target.Parent or not p or not p.Parent then
 		return false
 	end
+	if not isToolValid(tool) then return false end
 	local ok = pcall(DamageRF.InvokeServer, DamageRF,
 		target, tool, nextId(), CFrame.new(p.Position), false)
 	if HitSoundRE and ok then
@@ -998,34 +1013,45 @@ local function hitOnce(tool, target, p)
 end
 
 local function equipToolSafe(tool)
-	if EquipRE and tool then
-		pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
-		task.wait(0.03)
-	end
+	if not (EquipRE and isToolValid(tool)) then return end
+	if isToolEquippedOnChar(tool) then return end
+	pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
+	task.wait(0.06)
 end
 
 local function unequipToolSafe(tool)
-	if UnequipRE and tool then
-		pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
-		if lastEquippedChopTool == tool then
-			lastEquippedChopTool = nil
-		end
-		task.wait(0.025)
+	-- Chỉ unequip nếu tool vẫn tồn tại hợp lệ và đang thực sự cầm trên Character
+	if not (UnequipRE and isToolValid(tool)) then return end
+	if not isToolEquippedOnChar(tool) then return end
+	pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
+	if lastEquippedChopTool == tool then
+		lastEquippedChopTool = nil
 	end
+	task.wait(0.05)
 end
 
--- Chỉ Equip 1 lần cho mỗi cây / mỗi lần đổi rìu
+-- Chỉ gửi lệnh Equip nếu rìu chưa được cầm trên Character (tránh spam Equip gây mất rìu)
 local function equipChopToolOnce(tool)
-	if not EquipRE or not tool then return end
-	if lastEquippedChopTool ~= tool then
+	if not (EquipRE and isToolValid(tool)) then return false end
+	if isToolEquippedOnChar(tool) then
+		lastEquippedChopTool = tool
+		return true
+	end
+	if lastEquippedChopTool ~= tool or not isToolEquippedOnChar(tool) then
 		pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
 		lastEquippedChopTool = tool
-		task.wait(0.05)
+		task.wait(0.08)
 	end
+	return isToolValid(tool)
 end
 
 local function swingBatch(tool, targets)
 	if not (EquipRE and UnequipRE and DamageRF) or #targets == 0 then return end
+	if not isToolValid(tool) then return end
+
+	-- Nếu AutoChop đang giữ rìu thì không để KillAura tự ý unequip làm mất đồng bộ
+	local sharedWithChop = isChoppingNow and (lastEquippedChopTool == tool)
+
 	equipToolSafe(tool)
 	local limit = math.min(#targets, MAX_KILL_PER_CYCLE)
 	for i = 1, limit do
@@ -1039,8 +1065,10 @@ local function swingBatch(tool, targets)
 		end
 		if i < limit then task.wait(0.05) end
 	end
-	unequipToolSafe(tool)
-	lastEquippedChopTool = nil
+
+	if not sharedWithChop and not CFG.AutoChop then
+		unequipToolSafe(tool)
+	end
 end
 
 local SCAN_FOLDERS = { "Characters","Enemies","Mobs","NPCs" }
@@ -1223,7 +1251,7 @@ local function getTrees(r, maxRadius, tool)
 end
 
 local function spamChopDamageOnce(tool, treeModel, treePart, savedName, savedDebugId, fallbackPos)
-	if not DamageRF or not tool then return false end
+	if not DamageRF or not isToolValid(tool) then return false end
 
 	local actualTarget = (treeModel and treeModel.Parent)
 		and treeModel
@@ -1254,9 +1282,12 @@ local function spamChopDamageOnce(tool, treeModel, treePart, savedName, savedDeb
 	return ok == true
 end
 
-local function tpToTreeAndChop(treeModel, treePart, tool)
+local function tpToTreeAndChop(treeModel, treePart, initialTool)
 	local r = root()
 	if not (r and treeModel and treeModel.Parent and treePart and treePart.Parent) then
+		return false
+	end
+	if not isToolValid(initialTool) then
 		return false
 	end
 
@@ -1268,22 +1299,31 @@ local function tpToTreeAndChop(treeModel, treePart, tool)
 	r.CFrame = CFrame.lookAt(targetPos + Vector3.new(0, 2.5, -3), targetPos)
 	task.wait(0.08)
 
-	-- Chỉ Equip 1 lần khi chuyển sang cây mới
-	equipChopToolOnce(tool)
+	isChoppingNow = true
+	local lockedTool = initialTool
+	if not equipChopToolOnce(lockedTool) then
+		isChoppingNow = false
+		return false
+	end
 
 	local swings = 0
 	local maxSwings = 45
 	local failedHits = 0
-	local spamWait = math.min(math.max(CFG.Delay or 0.06, 0.04), 0.12)
+	local spamWait = math.min(math.max(CFG.Delay or 0.06, 0.05), 0.12)
 
 	-- Spam ToolDamageObject liên tục cho đến khi cây gãy hẳn mới chuyển cây khác
 	while CFG.AutoChop and not isTreeBroken(treeModel, treePart) and swings < maxSwings do
 		local rr = root()
-		local currentTool = getChopTool() or tool
-		if not (rr and currentTool) then break end
+		if not rr then break end
 
-		if lastEquippedChopTool ~= currentTool then
-			equipChopToolOnce(currentTool)
+		-- Kiểm tra rìu đang khóa còn hợp lệ không; chỉ tìm rìu khác nếu rìu cũ không còn
+		if not isToolValid(lockedTool) then
+			local fallback = getChopTool()
+			if not isToolValid(fallback) then break end
+			lockedTool = fallback
+			equipChopToolOnce(lockedTool)
+		elseif not isToolEquippedOnChar(lockedTool) then
+			equipChopToolOnce(lockedTool)
 		end
 
 		local curTreePos = (treePart and treePart.Parent) and treePart.Position or targetPos
@@ -1291,7 +1331,7 @@ local function tpToTreeAndChop(treeModel, treePart, tool)
 			rr.CFrame = CFrame.lookAt(curTreePos + Vector3.new(0, 2.5, -3), curTreePos)
 		end
 
-		local hitOk = spamChopDamageOnce(currentTool, treeModel, treePart, savedName, savedDebugId, curTreePos)
+		local hitOk = spamChopDamageOnce(lockedTool, treeModel, treePart, savedName, savedDebugId, curTreePos)
 		if hitOk then
 			failedHits = 0
 		else
@@ -1305,6 +1345,7 @@ local function tpToTreeAndChop(treeModel, treePart, tool)
 		task.wait(spamWait)
 	end
 
+	isChoppingNow = false
 	return isTreeBroken(treeModel, treePart)
 end
 
@@ -1313,7 +1354,7 @@ task.spawn(function()
 	while true do
 		if CFG.KillAura then
 			local r, tool = root(), getKillTool()
-			if r and tool then
+			if r and isToolValid(tool) then
 				local targets = getAnimals(r)
 				if #targets > 0 then
 					pcall(swingBatch, tool, targets)
@@ -1331,7 +1372,7 @@ task.spawn(function()
 	while true do
 		if CFG.AutoChop then
 			local r, tool = root(), getChopTool()
-			if r and tool then
+			if r and isToolValid(tool) then
 				local trees = getTrees(r, CFG.ChopRadius, tool)
 				if #trees == 0 then
 					trees = getTrees(r, nil, tool)
@@ -1342,6 +1383,7 @@ task.spawn(function()
 					pcall(function()
 						broken = tpToTreeAndChop(chosen.m, chosen.p, tool)
 					end)
+					isChoppingNow = false
 					if broken then
 						skipTree[chosen.m] = os.clock() + 60
 					else
@@ -1349,12 +1391,11 @@ task.spawn(function()
 					end
 				end
 			end
-			task.wait(0.1)
+			task.wait(0.12)
 		else
-			if lastEquippedChopTool then
-				unequipToolSafe(lastEquippedChopTool)
-				lastEquippedChopTool = nil
-			end
+			-- Không tự động gọi unequipToolSafe khi tắt AutoChop để tránh server xóa/desync rìu
+			isChoppingNow = false
+			lastEquippedChopTool = nil
 			task.wait(0.25)
 		end
 	end
