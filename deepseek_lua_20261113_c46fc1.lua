@@ -1,6 +1,6 @@
 --========================================================
 -- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & OPTIMIZED)
--- TP Auto Chop (Break-to-Switch + Tree Filter by Axe)
+-- TP Auto Chop (Break-to-Switch + Tree Tier Filter + Fast Damage Spam)
 -- Independent Kill Aura + Conflict Warning | Auto Rescue Children
 -- Cached Chest + Ammo + Coins | Zero-Lag Mobile Ready
 --========================================================
@@ -33,24 +33,30 @@ end
 -- REMOTES & GAME DATA
 --========================================================
 
-local Remotes       = RS:WaitForChild("RemoteEvents", 10)
-local EquipRE       = Remotes and Remotes:FindFirstChild("EquipItemHandle")
-local UnequipRE     = Remotes and Remotes:FindFirstChild("UnequipItemHandle")
-local DamageRF      = Remotes and Remotes:FindFirstChild("ToolDamageObject")
-local MapRE         = Remotes and Remotes:FindFirstChild("MapCellsDiscovered")
-local DragRE        = Remotes and Remotes:FindFirstChild("RequestStartDraggingItem")
-local StopDragRE    = Remotes and Remotes:FindFirstChild("StopDraggingItem")
-local HitSoundRE    = Remotes and Remotes:FindFirstChild("PlayEnemyHitSound")
-local PlantRE       = Remotes and Remotes:FindFirstChild("RequestPlantItem")
-local ConsumeRF     = Remotes and Remotes:FindFirstChild("RequestConsumeItem")
-local OpenChestRE   = Remotes and Remotes:FindFirstChild("RequestOpenItemChest")
-local CollectCoinRF = Remotes and Remotes:FindFirstChild("RequestCollectCoints")
-local HotbarItemRF  = Remotes and Remotes:FindFirstChild("RequestHotbarItem")
-local BagStoreRF    = Remotes and Remotes:FindFirstChild("RequestBagStoreItem")
-local BagDropRE     = Remotes and Remotes:FindFirstChild("RequestBagDropItem")
+local Remotes          = RS:WaitForChild("RemoteEvents", 10)
+local EquipRE          = Remotes and Remotes:FindFirstChild("EquipItemHandle")
+local UnequipRE        = Remotes and Remotes:FindFirstChild("UnequipItemHandle")
+local DamageRF         = Remotes and Remotes:FindFirstChild("ToolDamageObject")
+local MapRE            = Remotes and Remotes:FindFirstChild("MapCellsDiscovered")
+local DragRE           = Remotes and Remotes:FindFirstChild("RequestStartDraggingItem")
+local StopDragRE       = Remotes and Remotes:FindFirstChild("StopDraggingItem")
+local HitSoundRE       = Remotes and Remotes:FindFirstChild("PlayEnemyHitSound")
+local ReplicateSoundRE = Remotes and Remotes:FindFirstChild("RequestReplicateSound")
+local PlantRE          = Remotes and Remotes:FindFirstChild("RequestPlantItem")
+local ConsumeRF        = Remotes and Remotes:FindFirstChild("RequestConsumeItem")
+local OpenChestRE      = Remotes and Remotes:FindFirstChild("RequestOpenItemChest")
+local CollectCoinRF    = Remotes and Remotes:FindFirstChild("RequestCollectCoints")
+local HotbarItemRF     = Remotes and Remotes:FindFirstChild("RequestHotbarItem")
+local BagStoreRF       = Remotes and Remotes:FindFirstChild("RequestBagStoreItem")
+local BagDropRE        = Remotes and Remotes:FindFirstChild("RequestBagDropItem")
 
 local AXES = {
 	"Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
+}
+local HEAVY_AXES = {
+	["Strong Axe"] = true,
+	["Chainsaw"]   = true,
+	["Admin Axe"]  = true,
 }
 local MELEE_WEAPONS = {
 	"Spear","Honey Spear","Morningstar","Katana","Laser Sword","Ice Sword",
@@ -128,11 +134,22 @@ local function hum()
 	return c and c:FindFirstChildOfClass("Humanoid")
 end
 
+local function getHeadPart()
+	local c = Player.Character
+	return c and (c:FindFirstChild("Head") or c:FindFirstChild("HumanoidRootPart"))
+end
+
 local function partOf(m)
 	if not m then return nil end
 	if m:IsA("BasePart") then return m end
 	if m:IsA("Model") then
 		if m.PrimaryPart then return m.PrimaryPart end
+		-- Ưu tiên lấy phần thân cây / hitbox nếu có
+		for _, child in ipairs(m:GetDescendants()) do
+			if child:IsA("BasePart") and hasKey(child.Name, { "Trunk", "Wood", "Log", "Hitbox", "Stem" }) then
+				return child
+			end
+		end
 		local hrp = m:FindFirstChild("HumanoidRootPart")
 		if hrp then return hrp end
 		return m:FindFirstChildWhichIsA("BasePart", true)
@@ -168,7 +185,6 @@ end
 
 local function getChopTool()
 	local inv, char = Player:FindFirstChild("Inventory"), Player.Character
-	-- Ưu tiên rìu mạnh nhất trước để chặt được cả cây lớn
 	local priorityAxes = { "Admin Axe", "Chainsaw", "Strong Axe", "Ice Axe", "Good Axe", "Old Axe" }
 	return findFromList(priorityAxes, inv, char)
 		or findFromList(AXES, inv, char)
@@ -930,11 +946,17 @@ task.spawn(function()
 end)
 
 --========================================================
--- COUNTER, KILL AURA & TP AUTO CHOP (BREAK-TO-SWITCH + AXE FILTER)
+-- COUNTER, KILL AURA & TP AUTO CHOP (BREAK-TO-SWITCH + TIERS)
 --========================================================
 
 local hitCounter = 0
-local function resetCounter() hitCounter = 0 end
+local lastEquippedChopTool = nil
+
+local function resetCounter()
+	hitCounter = 0
+	lastEquippedChopTool = nil
+end
+
 Workspace.ChildAdded:Connect(function(c)
 	if c.Name == "Map" then
 		resetCounter()
@@ -953,13 +975,23 @@ local function nextId()
 	return hitCounter .. "_" .. TOOL_SUFFIX
 end
 
+local function fireWoodChopSound()
+	local head = getHeadPart()
+	if ReplicateSoundRE and head then
+		pcall(ReplicateSoundRE.FireServer, ReplicateSoundRE, "FireAllClients", "WoodChop", {
+			Instance = head,
+			Volume = 0.4,
+		})
+	end
+end
+
 local function hitOnce(tool, target, p)
 	if not DamageRF or not target or not target.Parent or not p or not p.Parent then
 		return false
 	end
 	local ok = pcall(DamageRF.InvokeServer, DamageRF,
 		target, tool, nextId(), CFrame.new(p.Position), false)
-	if HitSoundRE then
+	if HitSoundRE and ok then
 		pcall(HitSoundRE.FireServer, HitSoundRE, "FireAllClients", target, tool)
 	end
 	return ok == true
@@ -975,7 +1007,20 @@ end
 local function unequipToolSafe(tool)
 	if UnequipRE and tool then
 		pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
+		if lastEquippedChopTool == tool then
+			lastEquippedChopTool = nil
+		end
 		task.wait(0.025)
+	end
+end
+
+-- Chỉ Equip 1 lần cho mỗi cây / mỗi lần đổi rìu
+local function equipChopToolOnce(tool)
+	if not EquipRE or not tool then return end
+	if lastEquippedChopTool ~= tool then
+		pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
+		lastEquippedChopTool = tool
+		task.wait(0.05)
 	end
 end
 
@@ -995,6 +1040,7 @@ local function swingBatch(tool, targets)
 		if i < limit then task.wait(0.05) end
 	end
 	unequipToolSafe(tool)
+	lastEquippedChopTool = nil
 end
 
 local SCAN_FOLDERS = { "Characters","Enemies","Mobs","NPCs" }
@@ -1032,6 +1078,31 @@ local function getAnimals(r)
 end
 
 local skipTree = {}
+local TREE_KEYS = { "Tree","Pine","Oak","Birch","Fir" }
+
+local YOUNG_TREE_KEYS = {
+	"Sapling", "Young", "Small", "Sprout", "Growing", "Baby", "Seedling",
+	"Log", "Plank", "Scrap", "Chair", "Stump", "Fallen"
+}
+
+local BIG_TREE_KEYS = {
+	"Big", "Large", "Giant", "Huge", "Ancient", "Mega", "Elder", "Great"
+}
+
+local function findNilEquivalent(targetName, targetDebugId)
+	if not (targetName and targetDebugId and getnilinstances) then return nil end
+	local okList, nilList = pcall(getnilinstances)
+	if not okList or not nilList then return nil end
+
+	for _, inst in ipairs(nilList) do
+		local okN, n = pcall(function() return inst.Name end)
+		local okD, d = pcall(function() return inst:GetDebugId() end)
+		if okN and okD and n == targetName and d == targetDebugId then
+			return inst
+		end
+	end
+	return nil
+end
 
 -- Kiểm tra xem cây đã gãy hoặc bị phá hủy chưa
 local function isTreeBroken(treeModel, treePart)
@@ -1049,7 +1120,6 @@ local function isTreeBroken(treeModel, treePart)
 	local h = treeModel:FindFirstChildWhichIsA("Humanoid", true)
 	if h and h.Health <= 0 then return true end
 
-	-- Khi cây gãy đổ trong game thường bỏ neo Anchored
 	if treePart:IsA("BasePart") and not treePart.Anchored then
 		return true
 	end
@@ -1057,63 +1127,81 @@ local function isTreeBroken(treeModel, treePart)
 	return false
 end
 
--- Nhận diện loại rìu
-local function getAxeType(tool)
-	if not tool then return nil end
-
-	local name = tool.Name:lower()
-
-	if name:find("admin axe", 1, true) then
-		return "Admin Axe"
-	elseif name:find("chainsaw", 1, true) then
-		return "Chainsaw"
-	elseif name:find("strong axe", 1, true) then
-		return "Strong Axe"
-	end
-
-	return "Normal"
+-- Chỉ Strong Axe, Chainsaw, Admin Axe mới chặt được cây lớn
+local function canChopBigTree(tool)
+	if not tool then return false end
+	return HEAVY_AXES[tool.Name] == true
 end
 
--- Kiểm tra cây có thể chặt bằng rìu hiện tại
-local function canChopTree(tree, tool)
-	if not tree or not tool then return false end
-
-	local name = tree.Name:lower()
-	local axeType = getAxeType(tool)
-
-	if name == "small tree" then
-		return true
+-- Phân loại cây: "young" (không chặt), "big" (cần rìu xịn), "normal" (mọi rìu)
+local function classifyTree(treeModel)
+	if not treeModel or not treeModel.Parent or not treeModel:IsA("Model") then
+		return nil
+	end
+	if not hasKey(treeModel.Name, TREE_KEYS) then
+		return nil
 	end
 
-	if name == "treebig1" or name == "treebig2" then
-		return axeType == "Strong Axe"
-			or axeType == "Chainsaw"
-			or axeType == "Admin Axe"
+	-- 1. Cây con / cây đang phát triển -> không thể chặt
+	if hasKey(treeModel.Name, YOUNG_TREE_KEYS) then
+		return "young"
+	end
+	local stage = treeModel:GetAttribute("Stage") or treeModel:GetAttribute("Growth")
+	if type(stage) == "string" and hasKey(stage, YOUNG_TREE_KEYS) then
+		return "young"
+	end
+	if type(stage) == "number" and stage < 1 then
+		return "young"
 	end
 
-	return false
+	local p = partOf(treeModel)
+	if not p or isTreeBroken(treeModel, p) then
+		return nil
+	end
+
+	-- 2. Kiểm tra kích thước tổng thể của Model cây
+	local okSize, size = pcall(function() return treeModel:GetExtentsSize() end)
+	if okSize and size then
+		if size.Y < 9 then
+			return "young"
+		end
+		if size.Y >= 32 or math.max(size.X, size.Z) >= 18 then
+			return "big"
+		end
+	end
+
+	-- 3. Kiểm tra từ khóa cây lớn
+	if hasKey(treeModel.Name, BIG_TREE_KEYS) then
+		return "big"
+	end
+
+	return "normal"
 end
 
--- Lấy danh sách cây có thể chặt trong bán kính, gần nhất đứng đầu
 local function getTrees(r, maxRadius, tool)
 	local out = {}
-	local maxDSq = maxRadius * maxRadius
-	local rPos = r.Position
-	local now = os.clock()
+	local useLimit = type(maxRadius) == "number" and maxRadius > 0
+	local maxDSq = useLimit and (maxRadius * maxRadius) or math.huge
+	local rPos   = r.Position
+	local now    = os.clock()
+	local allowBig = canChopBigTree(tool)
 
 	local function tryAddTree(t)
-		if not t:IsA("Model") then return end
 		if skipTree[t] and now < skipTree[t] then return end
-		if not canChopTree(t, tool) then return end
 
-		local p = partOf(t)
-		if not p then return end
-		if isTreeBroken(t, p) then return end
+		local treeType = classifyTree(t)
+		if not treeType or treeType == "young" then
+			return -- Bỏ qua cây con / cây đang phát triển
+		end
+		if treeType == "big" and not allowBig then
+			return -- Bỏ qua cây lớn nếu không cầm Strong Axe / Chainsaw / Admin Axe
+		end
 
+		local p = partOf(t); if not p then return end
 		local d = p.Position - rPos
-		local dSq = d.X * d.X + d.Y * d.Y + d.Z * d.Z
+		local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
 		if dSq <= maxDSq then
-			table.insert(out, { m = t, p = p, dSq = dSq })
+			table.insert(out, { m = t, p = p, dSq = dSq, treeType = treeType })
 		end
 	end
 
@@ -1146,48 +1234,89 @@ local function getTrees(r, maxRadius, tool)
 	return out
 end
 
+local function spamChopDamageOnce(tool, treeModel, treePart, savedName, savedDebugId, fallbackPos)
+	if not DamageRF or not tool then return false end
+
+	local actualTarget = (treeModel and treeModel.Parent)
+		and treeModel
+		or findNilEquivalent(savedName, savedDebugId)
+	if not actualTarget then return false end
+
+	local hitPos = (treePart and treePart.Parent) and treePart.Position or fallbackPos
+	local rr = root()
+	local hitCF
+	if rr and hitPos then
+		local lookPos = Vector3.new(hitPos.X, rr.Position.Y, hitPos.Z)
+		hitCF = CFrame.lookAt(hitPos, lookPos)
+	elseif hitPos then
+		hitCF = CFrame.new(hitPos)
+	else
+		hitCF = CFrame.new(0, 0, 0)
+	end
+
+	fireWoodChopSound()
+
+	local ok = pcall(DamageRF.InvokeServer, DamageRF,
+		actualTarget, tool, nextId(), hitCF, false)
+
+	if HitSoundRE and ok then
+		pcall(HitSoundRE.FireServer, HitSoundRE, "FireAllClients", actualTarget, tool)
+	end
+
+	return ok == true
+end
+
 local function tpToTreeAndChop(treeModel, treePart, tool)
 	local r = root()
 	if not (r and treeModel and treeModel.Parent and treePart and treePart.Parent) then
 		return false
 	end
 
-	local targetPos = treePart.Position
-	r.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, -3.5), targetPos)
-	task.wait(0.1)
+	local savedName = treeModel.Name
+	local okDbg, savedDebugId = pcall(function() return treeModel:GetDebugId() end)
+	if not okDbg then savedDebugId = nil end
 
-	equipToolSafe(tool)
+	local targetPos = treePart.Position
+	r.CFrame = CFrame.lookAt(targetPos + Vector3.new(0, 2.5, -3), targetPos)
+	task.wait(0.08)
+
+	-- Chỉ Equip 1 lần khi chuyển sang cây mới
+	equipChopToolOnce(tool)
 
 	local swings = 0
-	local maxSwings = 35 -- Giới hạn an toàn tránh kẹt cây lỗi map
+	local maxSwings = 45
 	local failedHits = 0
+	local spamWait = math.min(math.max(CFG.Delay or 0.06, 0.04), 0.12)
 
-	-- Chặt liên tục cho tới khi cây gãy hẳn mới chuyển cây khác
+	-- Spam ToolDamageObject liên tục cho đến khi cây gãy hẳn mới chuyển cây khác
 	while CFG.AutoChop and not isTreeBroken(treeModel, treePart) and swings < maxSwings do
 		local rr = root()
-		local currentTool = getChopTool()
+		local currentTool = getChopTool() or tool
 		if not (rr and currentTool) then break end
 
-		local curTreePos = treePart.Position
-		if (rr.Position - curTreePos).Magnitude > 12 then
-			rr.CFrame = CFrame.new(curTreePos + Vector3.new(0, 3, -3.5), curTreePos)
+		if lastEquippedChopTool ~= currentTool then
+			equipChopToolOnce(currentTool)
 		end
 
-		local hitOk = hitOnce(currentTool, treeModel, treePart)
+		local curTreePos = (treePart and treePart.Parent) and treePart.Position or targetPos
+		if (rr.Position - curTreePos).Magnitude > 7 then
+			rr.CFrame = CFrame.lookAt(curTreePos + Vector3.new(0, 2.5, -3), curTreePos)
+		end
+
+		local hitOk = spamChopDamageOnce(currentTool, treeModel, treePart, savedName, savedDebugId, curTreePos)
 		if hitOk then
 			failedHits = 0
 		else
 			failedHits += 1
-			if failedHits >= 5 then
+			if failedHits >= 8 then
 				break
 			end
 		end
 
 		swings += 1
-		task.wait(math.max(CFG.Delay, 0.12))
+		task.wait(spamWait)
 	end
 
-	unequipToolSafe(tool)
 	return isTreeBroken(treeModel, treePart)
 end
 
@@ -1216,17 +1345,28 @@ task.spawn(function()
 			local r, tool = root(), getChopTool()
 			if r and tool then
 				local trees = getTrees(r, CFG.ChopRadius, tool)
+				if #trees == 0 then
+					trees = getTrees(r, nil, tool)
+				end
 				if #trees > 0 then
 					local chosen = trees[1]
 					local broken = false
 					pcall(function()
 						broken = tpToTreeAndChop(chosen.m, chosen.p, tool)
 					end)
-					skipTree[chosen.m] = os.clock() + (broken and 60 or 5)
+					if broken then
+						skipTree[chosen.m] = os.clock() + 60
+					else
+						skipTree[chosen.m] = os.clock() + 5
+					end
 				end
 			end
-			task.wait(0.15)
+			task.wait(0.1)
 		else
+			if lastEquippedChopTool then
+				unequipToolSafe(lastEquippedChopTool)
+				lastEquippedChopTool = nil
+			end
 			task.wait(0.25)
 		end
 	end
