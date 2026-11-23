@@ -1,5 +1,5 @@
 --========================================================
--- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & OPTIMIZED)
+-- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE, FIXED & OPTIMIZED)
 -- TP Auto Chop (Exact Tree Name Filter + Anti-Lose Axe Fix)
 -- Independent Kill Aura + Conflict Warning | Auto Rescue Children
 -- Cached Chest + Ammo + Coins | Continuous Map Scan Scrapper & Fuel
@@ -13,6 +13,7 @@ local Lighting     = game:GetService("Lighting")
 local RS           = game:GetService("ReplicatedStorage")
 local Workspace    = game:GetService("Workspace")
 local CoreGui      = game:GetService("CoreGui")
+local StarterGui   = game:GetService("StarterGui")
 
 local Player    = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -69,14 +70,14 @@ local SACK_NAMES = {
 }
 local FOOD_ITEMS  = { "Berry","Carrot","Apple","Corn","Pumpkin","Chili" }
 
--- Đã bỏ "Log" và "Chair" khỏi nguyên liệu sắt đưa vào Scrapper
+-- Nguyên liệu sắt đưa vào Scrapper (không gồm Log & Chair)
 local SCRAP_ITEMS = {
 	"Bolt","Sheet Metal","Broken Fan","Broken Radio",
 	"Broken Microwave","Washing Machine","Tires & Engines",
 	"Scrap","Metal Scrap","Iron","Steel",
 }
 
--- Đã bỏ "Log" và "Chair" khỏi nhiên liệu đốt lửa trại
+-- Nhiên liệu đốt lửa trại (đã loại bỏ Log & Chair)
 local FUEL_EXACT = {
 	"Biofuel","Coal",
 	"Purple Fur Tuft","Fuel Canister","Oil Barrel",
@@ -1779,7 +1780,6 @@ local function scanMapItemsContinuous()
 		end
 	end
 
-	-- Giữ thêm các item đã lưu từ sự kiện DescendantAdded nếu còn tồn tại trên map
 	for o, _ in pairs(liveMapItems) do
 		if not seen[o] then
 			if o and o.Parent and isWorldItemCandidate(o)
@@ -1947,7 +1947,7 @@ local function dumpFuelToFire()
 	return count
 end
 
--- Auto TP/đưa nguyên liệu sắt đến Scrapper (không giới hạn số lượng, quét liên tục)
+-- Auto đưa nguyên liệu sắt đến Scrapper (không giới hạn số lượng, quét liên tục)
 local scrapStatusText = "Chờ bật auto đưa nguyên liệu → Scrapper..."
 local scrapStatusLbl  = nil
 local totalScrappedItems = 0
@@ -1980,7 +1980,6 @@ local function dumpScrapToScrapper()
 	local movedNow, seen = 0, {}
 
 	for _, o in ipairs(searchList) do
-		if CFG.AutoScrap == false and scrapStatusLbl == nil then break end
 		if not (o:IsA("Model") or o:IsA("BasePart")) then continue end
 		if seen[o] then continue end
 		if (movedScrapAt[o] or 0) + 6 > os.clock() then continue end
@@ -2091,7 +2090,7 @@ local function revealMap()
 end
 
 --========================================================
--- SUNSET UI LIBRARY
+-- SUNSET UI LIBRARY (FIXED MENU OPEN/CLOSE)
 --========================================================
 
 local Library = {}
@@ -2099,18 +2098,24 @@ local Library = {}
 function Library:CreateWindow(title)
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "SunsetUI"
-	gui.Parent = CoreGui.Parent and CoreGui or PlayerGui
-	pcall(function() gui.Parent = CoreGui end)
-	if gui.Parent ~= CoreGui then
-		gui.Parent = PlayerGui
-	end
 	gui.IgnoreGuiInset = true
 	gui.ResetOnSpawn = false
-	gui.DisplayOrder = 100
+	gui.DisplayOrder = 999999
+
+	local placedInCore = false
+	pcall(function()
+		if CoreGui and CoreGui.Parent then
+			gui.Parent = CoreGui
+			placedInCore = true
+		end
+	end)
+	if not placedInCore or gui.Parent ~= CoreGui then
+		gui.Parent = PlayerGui
+	end
 
 	local currentColor = Color3.fromRGB(255, 128, 0)
 	local toggleButton = nil
-	local toggleButtonSize = 40
+	local toggleButtonSize = 44
 	local mainFrame = nil
 	local sidebarFrame = nil
 	local titleLabel = nil
@@ -2143,13 +2148,13 @@ function Library:CreateWindow(title)
 		toggleButtonSize = newSize
 		if toggleButton then
 			toggleButton.Size = UDim2.new(0, newSize, 0, newSize)
-			toggleButton.Position = UDim2.new(0, 10, 0.5, -(newSize / 2))
+			toggleButton.Position = UDim2.new(0, 14, 0.5, -(newSize / 2))
 		end
 	end
 
 	local function Notify(titulo, texto, duracao)
 		pcall(function()
-			game:GetService("StarterGui"):SetCore("SendNotification", {
+			StarterGui:SetCore("SendNotification", {
 				Title = titulo,
 				Text = texto,
 				Duration = duracao or 5,
@@ -2158,11 +2163,13 @@ function Library:CreateWindow(title)
 	end
 
 	toggleButton = Instance.new("ImageButton")
+	toggleButton.Name = "ToggleMenuBtn"
 	toggleButton.Size = UDim2.new(0, toggleButtonSize, 0, toggleButtonSize)
-	toggleButton.Position = UDim2.new(0, 10, 0.5, -(toggleButtonSize / 2))
+	toggleButton.Position = UDim2.new(0, 14, 0.5, -(toggleButtonSize / 2))
 	toggleButton.BackgroundColor3 = currentColor
 	toggleButton.Image = "rbxassetid://97939372251102"
-	toggleButton.ZIndex = 20
+	toggleButton.Active = true
+	toggleButton.ZIndex = 50
 	toggleButton.Parent = gui
 	Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(1, 0)
 
@@ -2183,16 +2190,27 @@ function Library:CreateWindow(title)
 	UIS.InputChanged:Connect(function(input)
 		if draggingBtn and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
 			local delta = input.Position - dragStartBtn
-			if delta.Magnitude > 5 then movedBtn = true end
-			toggleButton.Position = UDim2.new(startPosBtn.X.Scale, startPosBtn.X.Offset + delta.X, startPosBtn.Y.Scale, startPosBtn.Y.Offset + delta.Y)
+			if delta.Magnitude > 8 then
+				movedBtn = true
+			end
+			toggleButton.Position = UDim2.new(
+				startPosBtn.X.Scale,
+				startPosBtn.X.Offset + delta.X,
+				startPosBtn.Y.Scale,
+				startPosBtn.Y.Offset + delta.Y
+			)
 		end
 	end)
 
 	mainFrame = Instance.new("Frame")
+	mainFrame.Name = "MainMenuFrame"
 	mainFrame.Size = UDim2.new(0, 450, 0, 380)
 	mainFrame.Position = UDim2.new(0.5, -225, 0.5, -190)
 	mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	mainFrame.BackgroundTransparency = 0.2
+	mainFrame.BackgroundTransparency = 0.15
+	mainFrame.Visible = true
+	mainFrame.Active = true
+	mainFrame.ZIndex = 10
 	mainFrame.Parent = gui
 	Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 
@@ -2212,7 +2230,12 @@ function Library:CreateWindow(title)
 	UIS.InputChanged:Connect(function(input)
 		if draggingMain and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
 			local delta = input.Position - dragStart
-			mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+			mainFrame.Position = UDim2.new(
+				startPos.X.Scale,
+				startPos.X.Offset + delta.X,
+				startPos.Y.Scale,
+				startPos.Y.Offset + delta.Y
+			)
 		end
 	end)
 
@@ -2225,6 +2248,7 @@ function Library:CreateWindow(title)
 	sidebarFrame.Size = UDim2.new(0, 90, 1, 0)
 	sidebarFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 	sidebarFrame.BackgroundTransparency = 0.2
+	sidebarFrame.ZIndex = 12
 	sidebarFrame.Parent = mainFrame
 	Instance.new("UICorner", sidebarFrame).CornerRadius = UDim.new(0, 8)
 
@@ -2239,21 +2263,32 @@ function Library:CreateWindow(title)
 	titleLabel.BackgroundTransparency = 1
 	titleLabel.TextSize = 14
 	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.ZIndex = 13
 	titleLabel.Parent = sidebarFrame
 
 	contentFrame = Instance.new("Frame")
 	contentFrame.Size = UDim2.new(1, -90, 1, 0)
 	contentFrame.Position = UDim2.new(0, 90, 0, 0)
 	contentFrame.BackgroundTransparency = 1
+	contentFrame.ZIndex = 12
 	contentFrame.Parent = mainFrame
 
-	local currentTab
+	local currentTab = nil
 	local tabY = 35
-	local tabOrderList = {}
+	local tabSelectCallbacks = {}
+
+	local function selectTabByIndex(idx)
+		local fn = tabSelectCallbacks[idx]
+		if fn then
+			pcall(fn)
+		end
+	end
 
 	local windowFunctions = {}
 
 	function windowFunctions:CreateTab(name)
+		local tabIndex = #tabSelectCallbacks + 1
+
 		local btn = Instance.new("TextButton")
 		btn.Size = UDim2.new(1, -10, 0, 28)
 		btn.Position = UDim2.new(0, 5, 0, tabY)
@@ -2262,10 +2297,10 @@ function Library:CreateWindow(title)
 		btn.TextColor3 = currentColor
 		btn.Font = Enum.Font.GothamBold
 		btn.TextSize = 11
+		btn.ZIndex = 14
 		btn.Parent = sidebarFrame
 		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
 		tabY = tabY + 33
-		table.insert(tabOrderList, btn)
 
 		local Tab = Instance.new("ScrollingFrame")
 		Tab.Size = UDim2.new(1, 0, 1, 0)
@@ -2278,6 +2313,7 @@ function Library:CreateWindow(title)
 		Tab.CanvasSize = UDim2.new(0, 0, 0, 0)
 		Tab.ScrollingEnabled = true
 		Tab.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		Tab.ZIndex = 13
 
 		local layout = Instance.new("UIListLayout", Tab)
 		layout.Padding = UDim.new(0, 8)
@@ -2288,7 +2324,7 @@ function Library:CreateWindow(title)
 		pad.PaddingTop = UDim.new(0, 8)
 		pad.PaddingBottom = UDim.new(0, 10)
 
-		btn.MouseButton1Click:Connect(function()
+		local function activateThisTab()
 			for _, child in ipairs(sidebarFrame:GetChildren()) do
 				if child:IsA("TextButton") then
 					child.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
@@ -2297,10 +2333,15 @@ function Library:CreateWindow(title)
 			end
 			btn.BackgroundColor3 = currentColor
 			btn.TextColor3 = Color3.fromRGB(0, 0, 0)
-			if currentTab then currentTab.Visible = false end
+			if currentTab and currentTab ~= Tab then
+				currentTab.Visible = false
+			end
 			currentTab = Tab
 			Tab.Visible = true
-		end)
+		end
+
+		tabSelectCallbacks[tabIndex] = activateThisTab
+		btn.MouseButton1Click:Connect(activateThisTab)
 
 		local Elements = {}
 
@@ -2312,6 +2353,7 @@ function Library:CreateWindow(title)
 			sectionFrame.BackgroundTransparency = 0.3
 			sectionFrame.Parent = Tab
 			sectionFrame.AutomaticSize = Enum.AutomaticSize.Y
+			sectionFrame.ZIndex = 14
 			Instance.new("UICorner", sectionFrame).CornerRadius = UDim.new(0, 6)
 
 			local stroke = Instance.new("UIStroke", sectionFrame)
@@ -2329,6 +2371,7 @@ function Library:CreateWindow(title)
 			titleLabelSection.TextSize = 12
 			titleLabelSection.Font = Enum.Font.GothamBold
 			titleLabelSection.TextXAlignment = Enum.TextXAlignment.Left
+			titleLabelSection.ZIndex = 15
 			titleLabelSection.Parent = sectionFrame
 
 			local container = Instance.new("Frame")
@@ -2336,6 +2379,7 @@ function Library:CreateWindow(title)
 			container.BackgroundTransparency = 1
 			container.Parent = sectionFrame
 			container.AutomaticSize = Enum.AutomaticSize.Y
+			container.ZIndex = 15
 
 			local clayout = Instance.new("UIListLayout", container)
 			clayout.Padding = UDim.new(0, 6)
@@ -2354,6 +2398,7 @@ function Library:CreateWindow(title)
 				l.TextSize = 11
 				l.TextXAlignment = Enum.TextXAlignment.Left
 				l.TextTruncate = Enum.TextTruncate.AtEnd
+				l.ZIndex = 16
 				l.Parent = container
 				return l
 			end
@@ -2366,6 +2411,7 @@ function Library:CreateWindow(title)
 				b.TextColor3 = currentColor
 				b.Font = Enum.Font.GothamBold
 				b.TextSize = 11
+				b.ZIndex = 16
 				b.Parent = container
 				Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
 				b.MouseButton1Click:Connect(function()
@@ -2388,6 +2434,7 @@ function Library:CreateWindow(title)
 				local f = Instance.new("Frame")
 				f.Size = UDim2.new(1, -12, 0, 36)
 				f.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+				f.ZIndex = 16
 				f.Parent = container
 				Instance.new("UICorner", f).CornerRadius = UDim.new(0, 4)
 
@@ -2401,12 +2448,14 @@ function Library:CreateWindow(title)
 				label.TextSize = 11
 				label.TextXAlignment = Enum.TextXAlignment.Left
 				label.TextTruncate = Enum.TextTruncate.AtEnd
+				label.ZIndex = 17
 				label.Parent = f
 
 				local toggle = Instance.new("Frame")
 				toggle.Size = UDim2.new(0, 40, 0, 20)
 				toggle.Position = UDim2.new(1, -50, 0.5, -10)
 				toggle.BackgroundColor3 = state and currentColor or Color3.fromRGB(50, 50, 50)
+				toggle.ZIndex = 17
 				toggle.Parent = f
 				Instance.new("UICorner", toggle).CornerRadius = UDim.new(1, 0)
 
@@ -2414,6 +2463,7 @@ function Library:CreateWindow(title)
 				circle.Size = UDim2.new(0, 16, 0, 16)
 				circle.Position = state and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
 				circle.BackgroundColor3 = state and Color3.fromRGB(0, 0, 0) or currentColor
+				circle.ZIndex = 18
 				circle.Parent = toggle
 				Instance.new("UICorner", circle).CornerRadius = UDim.new(1, 0)
 
@@ -2450,6 +2500,7 @@ function Library:CreateWindow(title)
 				local frame = Instance.new("Frame")
 				frame.Size = UDim2.new(1, -12, 0, 55)
 				frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+				frame.ZIndex = 16
 				frame.Parent = container
 				Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 4)
 
@@ -2461,18 +2512,21 @@ function Library:CreateWindow(title)
 				label.TextColor3 = currentColor
 				label.Font = Enum.Font.Gotham
 				label.TextSize = 11
+				label.ZIndex = 17
 				label.Parent = frame
 
 				local bar = Instance.new("Frame")
 				bar.Size = UDim2.new(1, -20, 0, 5)
 				bar.Position = UDim2.new(0, 10, 1, -15)
 				bar.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+				bar.ZIndex = 17
 				bar.Parent = frame
 				Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
 
 				local fill = Instance.new("Frame")
 				fill.Size = UDim2.new(initAlpha, 0, 1, 0)
 				fill.BackgroundColor3 = currentColor
+				fill.ZIndex = 18
 				fill.Parent = bar
 				Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
 
@@ -2533,20 +2587,31 @@ function Library:CreateWindow(title)
 
 	local open = true
 	local notified = false
-	toggleButton.MouseButton1Click:Connect(function()
-		if movedBtn then return end
-		open = not open
-		mainFrame.Visible = open
-		if open and not notified then
-			Notify("Welcome Sunset 🌞", "99 Nights Loaded 🌞", 4)
-			notified = true
+	local function toggleMainMenu()
+		if movedBtn then
+			movedBtn = false
+			return
 		end
-	end)
+		open = not mainFrame.Visible
+		mainFrame.Visible = open
+		if open then
+			if not currentTab and #tabSelectCallbacks > 0 then
+				selectTabByIndex(1)
+			elseif currentTab then
+				currentTab.Visible = true
+			end
+			if not notified then
+				Notify("Welcome Sunset 🌞", "99 Nights Loaded 🌞", 4)
+				notified = true
+			end
+		end
+	end
+
+	toggleButton.MouseButton1Click:Connect(toggleMainMenu)
+	toggleButton.Activated:Connect(toggleMainMenu)
 
 	task.defer(function()
-		if tabOrderList[1] then
-			firesignal(tabOrderList[1].MouseButton1Click)
-		end
+		selectTabByIndex(1)
 	end)
 
 	return windowFunctions
@@ -2561,9 +2626,16 @@ flyPad.Size = UDim2.fromOffset(60, 124)
 flyPad.Position = UDim2.new(1, -70, 1, -132)
 flyPad.BackgroundTransparency = 1
 flyPad.Visible = false
-flyPad.Parent = CoreGui.Parent and CoreGui or PlayerGui
-pcall(function() flyPad.Parent = CoreGui end)
-if flyPad.Parent ~= CoreGui then
+flyPad.ZIndex = 40
+
+local placedFlyPadInCore = false
+pcall(function()
+	if CoreGui and CoreGui.Parent then
+		flyPad.Parent = CoreGui
+		placedFlyPadInCore = true
+	end
+end)
+if not placedFlyPadInCore or flyPad.Parent ~= CoreGui then
 	flyPad.Parent = PlayerGui
 end
 
@@ -2576,6 +2648,7 @@ local function holdBtn(yOff, text, onState)
 	b.TextColor3 = Color3.fromRGB(255, 128, 0)
 	b.Font = Enum.Font.GothamBold
 	b.TextSize = 20
+	b.ZIndex = 41
 	b.Parent = flyPad
 	Instance.new("UICorner", b).CornerRadius = UDim.new(1, 0)
 	local st = Instance.new("UIStroke", b)
@@ -2826,7 +2899,7 @@ do
 	sMap:AddButton("🗺️ Reveal Map", function()
 		task.spawn(revealMap)
 	end)
-	sMap:AddSlider("Kích thước nút bật/tắt", 32, 70, 40, function(v)
+	sMap:AddSlider("Kích thước nút bật/tắt", 32, 70, 44, function(v)
 		Win:SetToggleSize(v)
 	end)
 end
