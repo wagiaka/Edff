@@ -1,6 +1,6 @@
 --========================================================
 -- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE)
--- Deep Chest -> Loot Flow (2s) | Chair Scrap | Auto Coins
+-- Chest -> Loot At Chest Pos (2s, Cached) | Chair Scrap | Auto Coins
 -- PC + MOBILE
 --========================================================
 
@@ -192,12 +192,13 @@ local function getNilByName(name)
 end
 
 --========================================================
--- DEEP AUTO OPEN CHEST -> LOOT THAT CHEST (2s DELAY, SKIP BAD)
+-- AUTO OPEN CHEST -> LOOT AT EXACT CHEST POSITION (2s)
 --========================================================
 
 local chestLootStatusText = "Chờ bật tự động mở & nhặt rương..."
 local chestLootStatusLbl  = nil
 
+local cachedChests    = {}
 local openedChestDone = setmetatable({}, { __mode = "k" })
 local failedChestAt   = {}
 local lootedItems     = setmetatable({}, { __mode = "k" })
@@ -205,7 +206,7 @@ local failedLootAt    = {}
 
 local CHEST_FAIL_COOLDOWN = 45
 local LOOT_FAIL_COOLDOWN  = 35
-local LOOT_RADIUS_STUDS   = 24
+local CHEST_LOOT_RADIUS   = 12
 local STEP_WAIT_SECONDS   = 2
 
 local totalChestsOpened = 0
@@ -218,30 +219,46 @@ local function updateChestLootStatus(txt)
 	end
 end
 
-local function scanAllChests()
-	local chests, seen = {}, {}
-	local function tryAdd(o)
-		if seen[o] then return end
-		if (o:IsA("Model") or o:IsA("BasePart")) and hasKey(o.Name, CHEST_KEYS) then
-			seen[o] = true
-			table.insert(chests, o)
-		end
-	end
+local function isChestObject(o)
+	return (o:IsA("Model") or o:IsA("BasePart")) and hasKey(o.Name, CHEST_KEYS)
+end
+
+local chestCacheInitialized = false
+local function initChestCache()
+	if chestCacheInitialized then return end
+	chestCacheInitialized = true
 
 	local itemsFolder = Workspace:FindFirstChild("Items")
-	if itemsFolder then
-		for _, o in ipairs(itemsFolder:GetDescendants()) do
-			tryAdd(o)
+	local targetRoot  = itemsFolder or Workspace
+
+	task.spawn(function()
+		local all = targetRoot:GetDescendants()
+		for i = 1, #all do
+			local o = all[i]
+			if isChestObject(o) then
+				cachedChests[o] = true
+			end
+			if i % 800 == 0 then task.wait() end
 		end
-	end
-	for _, o in ipairs(Workspace:GetDescendants()) do
-		tryAdd(o)
-	end
-	return chests
+	end)
+
+	targetRoot.DescendantAdded:Connect(function(o)
+		if isChestObject(o) then
+			cachedChests[o] = true
+		end
+	end)
+
+	targetRoot.DescendantRemoving:Connect(function(o)
+		cachedChests[o] = nil
+		failedChestAt[o] = nil
+	end)
 end
 
 local function isChestSkipped(chest, now)
-	if not chest or not chest.Parent then return true end
+	if not chest or not chest.Parent then
+		cachedChests[chest] = nil
+		return true
+	end
 	if openedChestDone[chest] then return true end
 	local failT = failedChestAt[chest]
 	if failT and (now - failT) < CHEST_FAIL_COOLDOWN then
@@ -260,22 +277,17 @@ local function isLootSkipped(item, now)
 	return false
 end
 
-local function isValidChestLoot(obj, targetChest, allChests)
+local function isValidChestLoot(obj, targetChest)
 	if not obj or not obj.Parent then return false end
+	if cachedChests[obj] or obj == targetChest or obj:IsDescendantOf(targetChest) then
+		return false
+	end
+
 	local ch = Player.Character
 	if ch and obj:IsDescendantOf(ch) then return false end
 	local inv = Player:FindFirstChild("Inventory")
 	if inv and obj:IsDescendantOf(inv) then return false end
 	if Players:GetPlayerFromCharacter(obj) then return false end
-
-	for _, c in ipairs(allChests) do
-		if obj == c or obj:IsDescendantOf(c) then
-			return false
-		end
-	end
-	if obj == targetChest or obj:IsDescendantOf(targetChest) then
-		return false
-	end
 
 	local name = obj.Name
 	if hasKey(name, CHEST_KEYS) or hasKey(name, COIN_KEYS) or hasKey(name, IGNORE_LOOT_KEYS) then
@@ -284,48 +296,46 @@ local function isValidChestLoot(obj, targetChest, allChests)
 
 	if obj:IsA("Tool") then return true end
 	if obj:IsA("Model") then
-		local hasInteract = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+		return (obj:FindFirstChildWhichIsA("ProximityPrompt", true)
 			or obj:FindFirstChildWhichIsA("ClickDetector", true)
-			or obj:FindFirstChildWhichIsA("BasePart", true)
-		return hasInteract ~= nil
+			or obj:FindFirstChildWhichIsA("BasePart", true)) ~= nil
 	end
 	return false
 end
 
-local function scanLootForChest(targetChest, allChests, now)
-	local chestPart = partOf(targetChest)
-	if not chestPart then return {} end
-	local cPos = chestPart.Position
+local overlapParams = OverlapParams.new()
+overlapParams.FilterType = Enum.RaycastFilterType.Exclude
 
+local function scanLootAtChestPos(chestPos, targetChest, now)
+	local excludeList = { targetChest }
+	if Player.Character then table.insert(excludeList, Player.Character) end
+	overlapParams.FilterDescendantsInstances = excludeList
+
+	local nearbyParts = Workspace:GetPartBoundsInRadius(chestPos, CHEST_LOOT_RADIUS, overlapParams)
 	local out, seen = {}, {}
-	local scanRoots = {}
-	local itemsFolder = Workspace:FindFirstChild("Items")
-	if itemsFolder then table.insert(scanRoots, itemsFolder) end
-	table.insert(scanRoots, Workspace)
 
-	for _, rootFolder in ipairs(scanRoots) do
-		for _, o in ipairs(rootFolder:GetDescendants()) do
-			if seen[o] then continue end
-			if isLootSkipped(o, now) then continue end
-			if not isValidChestLoot(o, targetChest, allChests) then continue end
+	for _, part in ipairs(nearbyParts) do
+		local candidate = part:FindFirstAncestorOfClass("Tool")
+			or part:FindFirstAncestorOfClass("Model")
+			or part
 
-			local p = partOf(o)
-			if p and (p.Position - cPos).Magnitude <= LOOT_RADIUS_STUDS then
-				seen[o] = true
-				table.insert(out, o)
+		if candidate and not seen[candidate] then
+			seen[candidate] = true
+			if not isLootSkipped(candidate, now) and isValidChestLoot(candidate, targetChest) then
+				local p = partOf(candidate)
+				local dist = p and (p.Position - chestPos).Magnitude or CHEST_LOOT_RADIUS
+				table.insert(out, { obj = candidate, dist = dist })
 			end
 		end
-		if #out > 0 then break end
 	end
 
-	table.sort(out, function(a, b)
-		local pa, pb = partOf(a), partOf(b)
-		if not pa then return false end
-		if not pb then return true end
-		return (pa.Position - cPos).Magnitude < (pb.Position - cPos).Magnitude
-	end)
+	table.sort(out, function(a, b) return a.dist < b.dist end)
 
-	return out
+	local sortedItems = {}
+	for i = 1, #out do
+		sortedItems[i] = out[i].obj
+	end
+	return sortedItems
 end
 
 local function tryLootSingleItem(item)
@@ -333,19 +343,26 @@ local function tryLootSingleItem(item)
 	local inv = Player:FindFirstChild("Inventory")
 	local beforeCount = inv and #inv:GetChildren() or 0
 
-	local ok, res = pcall(HotbarItemRF.InvokeServer, HotbarItemRF, item)
-	if not ok or res == false then
+	local done, ok, res = false, false, nil
+	task.spawn(function()
+		ok, res = pcall(HotbarItemRF.InvokeServer, HotbarItemRF, item)
+		done = true
+	end)
+
+	local timeout = 0
+	while not done and timeout < 0.5 do
+		task.wait(0.05)
+		timeout += 0.05
+	end
+
+	if not done or not ok or res == false then
 		return false
 	end
 
-	task.wait(0.08)
 	local nowInInv = (inv and item.Parent == inv) or (item.Parent == Player.Character)
 	local afterCount = inv and #inv:GetChildren() or 0
 
-	if nowInInv or afterCount > beforeCount or not item.Parent then
-		return true
-	end
-	return false
+	return nowInInv or afterCount > beforeCount or not item.Parent
 end
 
 local function openSingleChest(chest)
@@ -354,9 +371,9 @@ local function openSingleChest(chest)
 	return ok == true
 end
 
-local function lootItemsOfSingleChest(chest, allChests)
+local function lootItemsAtChest(chest, chestPos)
 	local now = os.clock()
-	local items = scanLootForChest(chest, allChests, now)
+	local items = scanLootAtChestPos(chestPos, chest, now)
 	if #items == 0 then
 		return 0, 0
 	end
@@ -375,7 +392,7 @@ local function lootItemsOfSingleChest(chest, allChests)
 			failedLootAt[item] = os.clock()
 			skipped += 1
 		end
-		task.wait(0.08)
+		task.wait(0.06)
 	end
 	return grabbed, skipped
 end
@@ -390,22 +407,30 @@ local function processNextChestStep()
 		return
 	end
 
-	local allChests = scanAllChests()
-	if #allChests == 0 then
-		updateChestLootStatus("⚠️ Không thấy rương · Đã mở " .. totalChestsOpened .. " | Nhặt " .. totalItemsLooted)
-		return
-	end
+	initChestCache()
 
 	local now = os.clock()
 	local targetChest = nil
-	for _, c in ipairs(allChests) do
-		if not isChestSkipped(c, now) then
-			targetChest = c
-			break
+	local targetPos   = nil
+	local r = root()
+	local rPos = r and r.Position
+
+	local bestDist = math.huge
+	for chest, _ in pairs(cachedChests) do
+		if not isChestSkipped(chest, now) then
+			local p = partOf(chest)
+			if p then
+				local d = rPos and (p.Position - rPos).Magnitude or 0
+				if d < bestDist then
+					bestDist = d
+					targetChest = chest
+					targetPos = p.Position
+				end
+			end
 		end
 	end
 
-	if not targetChest then
+	if not targetChest or not targetPos then
 		updateChestLootStatus(
 			string.format("✅ Hết rương · Rương: %d | Đồ: %d", totalChestsOpened, totalItemsLooted)
 		)
@@ -423,8 +448,11 @@ local function processNextChestStep()
 	task.wait(0.35)
 	if not CFG.AutoChestAndLoot then return end
 
+	local currentChestPart = partOf(targetChest)
+	local scanPos = currentChestPart and currentChestPart.Position or targetPos
+
 	updateChestLootStatus("🎒 Đang nhặt đồ rương: " .. tostring(targetChest.Name))
-	local grabbed, skipped = lootItemsOfSingleChest(targetChest, allChests)
+	local grabbed, skipped = lootItemsAtChest(targetChest, scanPos)
 
 	if grabbed > 0 or targetChest.Parent then
 		openedChestDone[targetChest] = true
@@ -1257,7 +1285,7 @@ function Library:CreateWindow(title)
 		end
 	end)
 	UIS.InputChanged:Connect(function(input)
-		if draggingBtn and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+		if draggingBtn and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType.MouseMovement) then
 			local delta = input.Position - dragStartBtn
 			if delta.Magnitude > 5 then movedBtn = true end
 			toggleButton.Position = UDim2.new(startPosBtn.X.Scale, startPosBtn.X.Offset + delta.X, startPosBtn.Y.Scale, startPosBtn.Y.Offset + delta.Y)
