@@ -1,5 +1,5 @@
 --========================================================
--- OLLIE UI V10 | DARK BLUE (AUTO OPEN CHEST + AUTO COLLECT COINS)
+-- OLLIE UI V10 | DARK BLUE (AUTO LOOT NO-SPAM + CHEST + COINS)
 -- Two Column | Smooth Animation | Image Support
 -- PC + MOBILE
 --========================================================
@@ -99,6 +99,7 @@ local PlantRE       = Remotes and Remotes:FindFirstChild("RequestPlantItem")
 local ConsumeRF     = Remotes and Remotes:FindFirstChild("RequestConsumeItem")
 local OpenChestRE   = Remotes and Remotes:FindFirstChild("RequestOpenItemChest")
 local CollectCoinRF = Remotes and Remotes:FindFirstChild("RequestCollectCoints")
+local HotbarItemRF  = Remotes and Remotes:FindFirstChild("RequestHotbarItem")
 
 local AXES = {
     "Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
@@ -120,6 +121,10 @@ local FUEL_EXACT = {
 }
 local CHEST_KEYS = { "Chest", "Crate", "Supply", "Loot" }
 local COIN_KEYS  = { "Coin" }
+local IGNORE_LOOT_KEYS = {
+    "Tree","Pine","Oak","Birch","Fir","Bush","Foliage","Wall","Floor","Ground",
+    "Terrain","Campfire","MainFire","Spawn","Part","Baseplate","Hitbox"
+}
 
 local CFG = {
     Speed=false,            WalkSpeed=40,
@@ -131,6 +136,7 @@ local CFG = {
     AutoDrop=false,
     AutoEat=false,
     AutoOpenChest=false,
+    AutoLootChest=false,
     AutoCollectCoins=false,
     ESPChild=false,
     Fullbright=false,
@@ -242,7 +248,7 @@ local function getNilByName(name)
 end
 
 --========================================================
--- AUTO OPEN ALL CHESTS & AUTO COLLECT ALL COINS
+-- AUTO OPEN CHESTS, AUTO LOOT (NO-SPAM) & AUTO COINS
 --========================================================
 
 local openedChestAt = {}
@@ -314,6 +320,171 @@ task.spawn(function()
         task.wait(1.5)
         if CFG.AutoOpenChest then
             pcall(openAllChestsOnce)
+        end
+    end
+end)
+
+local failedLootAt = {}
+local lootedItems  = setmetatable({}, { __mode = "k" })
+local lootStatusText = "Chờ bật tự động nhặt đồ rương..."
+local lootStatusLbl  = nil
+local totalLootedCount = 0
+local FAIL_COOLDOWN = 25
+
+local function updateLootStatus(txt, col)
+    lootStatusText = txt
+    if lootStatusLbl and lootStatusLbl.Parent then
+        lootStatusLbl.Text = txt
+        if col then lootStatusLbl.TextColor3 = col end
+    end
+end
+
+local function isSkippedLoot(obj, now)
+    if not obj or not obj.Parent then return true end
+    if lootedItems[obj] then return true end
+    local failTime = failedLootAt[obj]
+    if failTime and (now - failTime) < FAIL_COOLDOWN then
+        return true
+    end
+    return false
+end
+
+local function isValidLootCandidate(obj, chests)
+    if not obj or not obj.Parent then return false end
+    local ch = Player.Character
+    if ch and obj:IsDescendantOf(ch) then return false end
+    local inv = Player:FindFirstChild("Inventory")
+    if inv and obj:IsDescendantOf(inv) then return false end
+    if Players:GetPlayerFromCharacter(obj) then return false end
+
+    for _, chest in ipairs(chests) do
+        if obj == chest or obj:IsDescendantOf(chest) then
+            return false
+        end
+    end
+
+    local name = obj.Name
+    if hasKey(name, CHEST_KEYS) or hasKey(name, COIN_KEYS) or hasKey(name, IGNORE_LOOT_KEYS) then
+        return false
+    end
+
+    if obj:IsA("Tool") then return true end
+    if obj:IsA("Model") then
+        local hasInteract = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+            or obj:FindFirstChildWhichIsA("ClickDetector", true)
+            or obj:FindFirstChildWhichIsA("BasePart", true)
+        return hasInteract ~= nil
+    end
+    return false
+end
+
+local function scanChestLoot(now)
+    local candidates, seen = {}, {}
+    local chests = scanAllChests()
+    local chestParts = {}
+    for _, c in ipairs(chests) do
+        local p = partOf(c)
+        if p then table.insert(chestParts, p.Position) end
+    end
+
+    local function nearAnyChest(pos)
+        if #chestParts == 0 then return true end
+        for _, cp in ipairs(chestParts) do
+            if (pos - cp).Magnitude <= 28 then
+                return true
+            end
+        end
+        return false
+    end
+
+    local scanRoots = {}
+    local itemsFolder = Workspace:FindFirstChild("Items")
+    if itemsFolder then table.insert(scanRoots, itemsFolder) end
+    table.insert(scanRoots, Workspace)
+
+    for _, rootFolder in ipairs(scanRoots) do
+        for _, o in ipairs(rootFolder:GetDescendants()) do
+            if seen[o] then continue end
+            if isSkippedLoot(o, now) then continue end
+            if not isValidLootCandidate(o, chests) then continue end
+
+            local p = partOf(o)
+            if p and nearAnyChest(p.Position) then
+                seen[o] = true
+                table.insert(candidates, o)
+            end
+        end
+        if #candidates > 0 then break end
+    end
+
+    return candidates
+end
+
+local function tryLootItem(item)
+    if not HotbarItemRF then return false end
+    local inv = Player:FindFirstChild("Inventory")
+    local beforeCount = inv and #inv:GetChildren() or 0
+
+    local ok, res = pcall(HotbarItemRF.InvokeServer, HotbarItemRF, item)
+    if not ok or res == false then
+        return false
+    end
+
+    task.wait(0.08)
+    local nowInInv = (inv and item.Parent == inv) or (item.Parent == Player.Character)
+    local afterCount = inv and #inv:GetChildren() or 0
+
+    if nowInInv or afterCount > beforeCount or not item.Parent then
+        return true
+    end
+    return false
+end
+
+local function lootChestItemsOnce()
+    if not HotbarItemRF then
+        updateLootStatus("❌ Thiếu remote RequestHotbarItem", Color3.fromRGB(255, 100, 100))
+        return 0
+    end
+
+    local now = os.clock()
+    local candidates = scanChestLoot(now)
+    if #candidates == 0 then
+        updateLootStatus(
+            string.format("🎒 Không có món nhặt được (Đã nhặt: %d)", totalLootedCount),
+            Theme.SubText
+        )
+        return 0
+    end
+
+    local grabbed, skipped = 0, 0
+    for i = 1, math.min(#candidates, 12) do
+        if not CFG.AutoLootChest then break end
+        local item = candidates[i]
+        if isSkippedLoot(item, os.clock()) then continue end
+
+        if tryLootItem(item) then
+            lootedItems[item] = true
+            grabbed += 1
+            totalLootedCount += 1
+        else
+            failedLootAt[item] = os.clock()
+            skipped += 1
+        end
+        task.wait(0.1)
+    end
+
+    updateLootStatus(
+        string.format("🎒 Nhặt +%d · Bỏ qua %d · Tổng: %d", grabbed, skipped, totalLootedCount),
+        grabbed > 0 and Theme.Green or Theme.Amber
+    )
+    return grabbed
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1.4)
+        if CFG.AutoLootChest then
+            pcall(lootChestItemsOnce)
         end
     end
 end)
@@ -1411,6 +1582,7 @@ holdBtn(68, "▼", function(v) padDown = v end)
 local function ClearContent()
     eatStatusLbl   = nil
     chestStatusLbl = nil
+    lootStatusLbl  = nil
     coinStatusLbl  = nil
     for _, obj in ipairs(Content:GetChildren()) do
         if obj ~= ContentLayout and obj ~= Padding then
@@ -1725,6 +1897,16 @@ AddPage("Chính", "HOME", function()
     end)
     chestStatusLbl = InfoBox(chestStatusText)
 
+    Toggle("🎒 Tự động nhặt đồ rương (Bỏ qua đồ lỗi)", CFG.AutoLootChest, function(enabled)
+        CFG.AutoLootChest = enabled
+        if enabled then
+            task.spawn(lootChestItemsOnce)
+        else
+            updateLootStatus("Tắt (Tổng: " .. totalLootedCount .. ")", Theme.SubText)
+        end
+    end)
+    lootStatusLbl = InfoBox(lootStatusText)
+
     Toggle("🪙 Tự động nhặt toàn bộ xu", CFG.AutoCollectCoins, function(enabled)
         CFG.AutoCollectCoins = enabled
         if enabled then
@@ -2016,5 +2198,5 @@ OpenTab("Chính", true)
 OpenMenu()
 
 print("================================")
-print(" OLLIE UI V10 + CHEST & COINS ✓")
+print(" OLLIE UI V10 + AUTO LOOT ✓")
 print("================================")
