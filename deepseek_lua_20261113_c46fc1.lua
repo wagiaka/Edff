@@ -1,7 +1,7 @@
 --========================================================
--- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE)
--- Chest -> Loot At Chest Pos (2s) + Auto Scan & Claim Ammo
--- PC + MOBILE
+-- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & OPTIMIZED)
+-- Auto Rescue Children (TP -> Bag -> Campfire -> Drop)
+-- Cached Chest + Ammo + Coins | Zero-Lag Mobile Ready
 --========================================================
 
 local Players      = game:GetService("Players")
@@ -45,6 +45,8 @@ local ConsumeRF     = Remotes and Remotes:FindFirstChild("RequestConsumeItem")
 local OpenChestRE   = Remotes and Remotes:FindFirstChild("RequestOpenItemChest")
 local CollectCoinRF = Remotes and Remotes:FindFirstChild("RequestCollectCoints")
 local HotbarItemRF  = Remotes and Remotes:FindFirstChild("RequestHotbarItem")
+local BagStoreRF    = Remotes and Remotes:FindFirstChild("RequestBagStoreItem")
+local BagDropRE     = Remotes and Remotes:FindFirstChild("RequestBagDropItem")
 
 local AXES = {
 	"Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
@@ -54,6 +56,9 @@ local MELEE_WEAPONS = {
 	"Trident","Poison Claws","Poison Spear","Infernal Sword",
 	"Cultist King Mace","Brutal Battleaxe","Obsidiron Hammer",
 	"Scythe","Vampire Scythe","Happy's Scythe",
+}
+local SACK_NAMES = {
+	"Admin Sack","Strong Sack","Good Sack","Old Sack","Sack","Bag",
 }
 local FOOD_ITEMS  = { "Berry","Carrot","Apple","Corn","Pumpkin","Chili" }
 local SCRAP_ITEMS = {
@@ -83,6 +88,7 @@ local CFG = {
 	AutoEat=false,
 	AutoChestAndLoot=false,
 	AutoCollectCoins=false,
+	AutoRescueChild=false,
 	ESPChild=false,
 	Fullbright=false,
 	FixLag=false,
@@ -94,7 +100,7 @@ local TOOL_SUFFIX = "11960515286"
 local CHILD_KEY   = "Lost Child"
 
 --========================================================
--- GAME HELPERS
+-- GAME HELPERS (OPTIMIZED)
 --========================================================
 
 local function hasKey(name, keys)
@@ -166,16 +172,45 @@ local function getChopTool()
 		or getFallbackTool(inv, char)
 end
 
+local function getSackTool()
+	local inv, char = Player:FindFirstChild("Inventory"), Player.Character
+	local exact = findFromList(SACK_NAMES, inv, char)
+	if exact then return exact end
+	if inv then
+		for _, item in ipairs(inv:GetChildren()) do
+			if hasKey(item.Name, { "Sack", "Bag" }) then return item end
+		end
+	end
+	if char then
+		for _, item in ipairs(char:GetChildren()) do
+			if hasKey(item.Name, { "Sack", "Bag" }) then return item end
+		end
+	end
+	return nil
+end
+
+local cachedFirePart = nil
 local function getFirePart()
+	if cachedFirePart and cachedFirePart.Parent then
+		return cachedFirePart
+	end
 	local map  = Workspace:FindFirstChild("Map")
 	local camp = map and map:FindFirstChild("Campground")
 	local fire = camp and camp:FindFirstChild("MainFire", true)
-	if fire then return partOf(fire) end
+	if fire then
+		cachedFirePart = partOf(fire)
+		return cachedFirePart
+	end
 	for _, o in ipairs(Workspace:GetDescendants()) do
 		if o.Name == "MainFire" or o.Name == "Campfire" then
-			local p = partOf(o); if p then return p end
+			local p = partOf(o)
+			if p then
+				cachedFirePart = p
+				return p
+			end
 		end
 	end
+	return nil
 end
 
 local function getNilByName(name)
@@ -191,6 +226,206 @@ local function getNilByName(name)
 	end
 	return out
 end
+
+--========================================================
+-- EVENT-BASED CACHE: CHILDREN (NO WORKSPACE LAG)
+--========================================================
+
+local childSet = {}
+local function isChildModel(o)
+	return o and o:IsA("Model") and string.find(o.Name, CHILD_KEY, 1, true) ~= nil
+end
+
+local function initChildCache()
+	local charFolder = Workspace:FindFirstChild("Characters")
+	local scanTargets = { Workspace }
+	if charFolder then table.insert(scanTargets, charFolder) end
+
+	for _, folder in ipairs(scanTargets) do
+		for _, o in ipairs(folder:GetChildren()) do
+			if isChildModel(o) then childSet[o] = true end
+		end
+		folder.ChildAdded:Connect(function(o)
+			if isChildModel(o) then childSet[o] = true end
+		end)
+		folder.ChildRemoved:Connect(function(o)
+			childSet[o] = nil
+		end)
+	end
+
+	-- Quét sâu 1 lần duy nhất chia nhỏ để bắt trẻ nằm trong subfolder
+	task.spawn(function()
+		local all = Workspace:GetDescendants()
+		for i = 1, #all do
+			local o = all[i]
+			if isChildModel(o) then childSet[o] = true end
+			if i % 800 == 0 then task.wait() end
+		end
+	end)
+end
+initChildCache()
+
+--========================================================
+-- AUTO RESCUE CHILDREN (TP -> BAG -> CAMPFIRE -> DROP)
+--========================================================
+
+local rescueStatusText   = "Chờ bật tự động cứu trẻ..."
+local rescueStatusLbl    = nil
+local rescuedChildren    = setmetatable({}, { __mode = "k" })
+local rescuedChildKeys   = {} -- Lưu thêm theo DebugId/Name để chống trùng tuyệt đối
+local totalChildrenSaved = 0
+
+local function updateRescueStatus(txt)
+	rescueStatusText = txt
+	if rescueStatusLbl and rescueStatusLbl.Parent then
+		rescueStatusLbl.Text = txt
+	end
+end
+
+local function getChildUniqueKey(child)
+	if not child then return nil end
+	local ok, dbg = pcall(function() return child:GetDebugId() end)
+	if ok and dbg then return dbg end
+	return tostring(child)
+end
+
+local function isChildAlreadyRescued(child)
+	if not child then return true end
+	if rescuedChildren[child] then return true end
+	local key = getChildUniqueKey(child)
+	if key and rescuedChildKeys[key] then return true end
+
+	-- Nếu đứa trẻ đã đứng ngay sát lửa trại (<= 22 studs) thì cũng coi như đã ở trại
+	local fp = getFirePart()
+	local cp = partOf(child)
+	if fp and cp and (cp.Position - fp.Position).Magnitude <= 22 then
+		rescuedChildren[child] = true
+		if key then rescuedChildKeys[key] = true end
+		return true
+	end
+	return false
+end
+
+local function markChildRescued(child)
+	if not child then return end
+	rescuedChildren[child] = true
+	local key = getChildUniqueKey(child)
+	if key then rescuedChildKeys[key] = true end
+end
+
+local function findItemInBag(childName)
+	local itemBag = Player:FindFirstChild("ItemBag")
+	if not itemBag then return nil end
+	return itemBag:FindFirstChild(childName)
+		or itemBag:FindFirstChild(CHILD_KEY)
+		or itemBag:FindFirstChildWhichIsA("Model")
+end
+
+local function rescueSingleChild(child)
+	if not child or not child.Parent then return false end
+	if not (BagStoreRF and BagDropRE) then
+		updateRescueStatus("❌ Thiếu remote BagStore / BagDrop")
+		return false
+	end
+
+	local sack = getSackTool()
+	if not sack then
+		updateRescueStatus("❌ Không tìm thấy túi (Old Sack...)")
+		return false
+	end
+
+	local fp = getFirePart()
+	if not fp then
+		updateRescueStatus("❌ Không tìm thấy Lửa trại")
+		return false
+	end
+
+	local r = root()
+	local cp = partOf(child)
+	if not (r and cp) then return false end
+
+	local childName = child.Name
+	updateRescueStatus("🏃 Đang TP tới: " .. childName)
+
+	-- 1. Dịch chuyển sát đứa trẻ
+	r.CFrame = CFrame.new(cp.Position + Vector3.new(0, 3, 2))
+	task.wait(0.25)
+	if not CFG.AutoRescueChild then return false end
+
+	-- 2. Bỏ đứa trẻ vào balo (thử cả object trong ItemBag nếu game tạo sẵn hoặc chính model trong Workspace)
+	updateRescueStatus("🎒 Đang cất vào balo: " .. childName)
+	local bagTarget = findItemInBag(childName) or child
+	local storeOk = pcall(BagStoreRF.InvokeServer, BagStoreRF, sack, bagTarget)
+	if not storeOk then
+		-- Thử lại với target còn lại nếu lần đầu chưa khớp
+		local altTarget = (bagTarget == child) and findItemInBag(childName) or child
+		if altTarget then
+			pcall(BagStoreRF.InvokeServer, BagStoreRF, sack, altTarget)
+		end
+	end
+	task.wait(0.25)
+	if not CFG.AutoRescueChild then return false end
+
+	-- 3. Dịch chuyển về lửa trại
+	updateRescueStatus("🔥 Đang TP về lửa trại...")
+	r = root()
+	if r and fp and fp.Parent then
+		r.CFrame = CFrame.new(fp.Position + Vector3.new(0, 4, 3))
+	end
+	task.wait(0.25)
+
+	-- 4. Thả đứa trẻ ra tại lửa trại
+	updateRescueStatus("📤 Đang thả trẻ tại lửa trại...")
+	local dropTarget = (child and child.Parent) and child or findItemInBag(childName)
+	if dropTarget then
+		pcall(BagDropRE.FireServer, BagDropRE, sack, dropTarget, true)
+	end
+	task.wait(0.2)
+
+	-- 5. Đánh dấu đã cứu để không TP lại lần nữa
+	markChildRescued(child)
+	totalChildrenSaved += 1
+	updateRescueStatus(string.format("✅ Đã cứu %s (Tổng: %d)", childName, totalChildrenSaved))
+	return true
+end
+
+local function processNextChildRescue()
+	local r = root()
+	local rPos = r and r.Position
+	local nearestChild = nil
+	local bestDist = math.huge
+
+	for child, _ in pairs(childSet) do
+		if child and child.Parent and not isChildAlreadyRescued(child) then
+			local p = partOf(child)
+			if p then
+				local d = rPos and (p.Position - rPos).Magnitude or 0
+				if d < bestDist then
+					bestDist = d
+					nearestChild = child
+				end
+			end
+		end
+	end
+
+	if not nearestChild then
+		updateRescueStatus(string.format("✅ Đã cứu hết trẻ · Tổng: %d", totalChildrenSaved))
+		return
+	end
+
+	rescueSingleChild(nearestChild)
+end
+
+task.spawn(function()
+	while true do
+		if CFG.AutoRescueChild then
+			pcall(processNextChildRescue)
+			task.wait(1.0)
+		else
+			task.wait(0.5)
+		end
+	end
+end)
 
 --========================================================
 -- AUTO OPEN CHEST -> LOOT AT CHEST POS + AUTO SCAN AMMO (2s)
@@ -259,7 +494,6 @@ local function initChestCache()
 	end)
 end
 
--- Tự động quét mọi loại đạn (từ getnilinstances & Workspace) không cần fix tên
 local cachedAmmoList = {}
 local lastAmmoScanAt = 0
 local AMMO_SCAN_INTERVAL = 2.5
@@ -283,8 +517,7 @@ local function refreshAmmoCache(force)
 
 	local found, seen = {}, {}
 	local function tryAdd(o)
-		if not o or seen[o] then return end
-		if claimedAmmo[o] then return end
+		if not o or seen[o] or claimedAmmo[o] then return end
 		if isAmmoObject(o) then
 			seen[o] = true
 			table.insert(found, o)
@@ -329,10 +562,7 @@ local function tryClaimSingleAmmo(ammoObj)
 		timeout += 0.05
 	end
 
-	if not done or not ok or res == false then
-		return false
-	end
-	return true
+	return done and ok and res ~= false
 end
 
 local function collectScannedAmmo()
@@ -537,7 +767,6 @@ local function processNextChestStep()
 		end
 	end
 
-	-- Nếu hết rương thì vẫn tranh thủ quét & nhận đạn còn sót
 	if not targetChest or not targetPos then
 		local ammoGot = collectScannedAmmo()
 		updateChestLootStatus(
@@ -597,12 +826,13 @@ task.spawn(function()
 end)
 
 --========================================================
--- AUTO COLLECT ALL COINS
+-- EVENT-CACHED AUTO COLLECT ALL COINS (ZERO LAG)
 --========================================================
 
 local coinStatusText = "Chờ bật tự động nhặt xu..."
 local coinStatusLbl  = nil
 local totalCollectedCoins = 0
+local cachedCoins = {}
 
 local function updateCoinStatus(txt)
 	coinStatusText = txt
@@ -611,31 +841,36 @@ local function updateCoinStatus(txt)
 	end
 end
 
-local function scanAllCoins()
-	local coins, seen = {}, {}
-	local function tryAdd(obj)
-		if seen[obj] then return end
-		local okName, name = pcall(function() return obj.Name end)
-		if okName and hasKey(name, COIN_KEYS) then
-			seen[obj] = true
-			table.insert(coins, obj)
+local function isCoinObject(obj)
+	if not obj then return false end
+	local okName, name = pcall(function() return obj.Name end)
+	return okName and hasKey(name, COIN_KEYS)
+end
+
+local coinCacheInitialized = false
+local function initCoinCache()
+	if coinCacheInitialized then return end
+	coinCacheInitialized = true
+
+	local itemsFolder = Workspace:FindFirstChild("Items")
+	local targetRoot  = itemsFolder or Workspace
+
+	task.spawn(function()
+		local all = targetRoot:GetDescendants()
+		for i = 1, #all do
+			local o = all[i]
+			if isCoinObject(o) then cachedCoins[o] = true end
+			if i % 800 == 0 then task.wait() end
 		end
-	end
+	end)
 
-	for _, o in ipairs(Workspace:GetDescendants()) do
-		tryAdd(o)
-	end
+	targetRoot.DescendantAdded:Connect(function(o)
+		if isCoinObject(o) then cachedCoins[o] = true end
+	end)
 
-	if getnilinstances then
-		local ok, nilList = pcall(getnilinstances)
-		if ok and nilList then
-			for _, obj in ipairs(nilList) do
-				tryAdd(obj)
-			end
-		end
-	end
-
-	return coins
+	targetRoot.DescendantRemoving:Connect(function(o)
+		cachedCoins[o] = nil
+	end)
 end
 
 local function collectAllCoinsOnce()
@@ -644,17 +879,40 @@ local function collectAllCoinsOnce()
 		return 0
 	end
 
-	local coins = scanAllCoins()
-	if #coins == 0 then
+	initCoinCache()
+
+	local toCollect = {}
+	for coin, _ in pairs(cachedCoins) do
+		if coin and coin.Parent then
+			table.insert(toCollect, coin)
+		else
+			cachedCoins[coin] = nil
+		end
+	end
+
+	-- Quét thêm trong nil instances nếu có
+	if getnilinstances then
+		local ok, nilList = pcall(getnilinstances)
+		if ok and nilList then
+			for _, obj in ipairs(nilList) do
+				if isCoinObject(obj) then
+					table.insert(toCollect, obj)
+				end
+			end
+		end
+	end
+
+	if #toCollect == 0 then
 		updateCoinStatus("⚠️ Chưa thấy xu (Tổng: " .. totalCollectedCoins .. ")")
 		return 0
 	end
 
 	local collected = 0
-	for _, coin in ipairs(coins) do
+	for _, coin in ipairs(toCollect) do
 		if not CFG.AutoCollectCoins then break end
 		local ok = pcall(CollectCoinRF.InvokeServer, CollectCoinRF, coin)
 		if ok then
+			cachedCoins[coin] = nil
 			collected += 1
 			totalCollectedCoins += 1
 		end
@@ -677,40 +935,28 @@ task.spawn(function()
 end)
 
 --========================================================
--- CACHE TRẺ & COUNTER
+-- COUNTER & COMBAT (KILL AURA / AUTO CHOP)
 --========================================================
-
-local childCache = {}
-task.spawn(function()
-	while true do
-		local out = {}
-		for _, o in ipairs(Workspace:GetDescendants()) do
-			if o:IsA("Model") and string.find(o.Name, CHILD_KEY, 1, true) then
-				table.insert(out, o)
-			end
-		end
-		childCache = out
-		task.wait(1.5)
-	end
-end)
 
 local hitCounter = 0
 local function resetCounter() hitCounter = 0 end
 Workspace.ChildAdded:Connect(function(c)
-	if c.Name == "Map" then resetCounter() end
+	if c.Name == "Map" then
+		resetCounter()
+		cachedFirePart = nil
+	end
 end)
 Workspace.ChildRemoved:Connect(function(c)
-	if c.Name == "Map" then resetCounter() end
+	if c.Name == "Map" then
+		resetCounter()
+		cachedFirePart = nil
+	end
 end)
 
 local function nextId()
 	hitCounter += 1
 	return hitCounter .. "_" .. TOOL_SUFFIX
 end
-
---========================================================
--- SWING, KILL AURA & AUTO CHOP
---========================================================
 
 local function hitOnce(tool, target, p)
 	if not DamageRF then return false end
@@ -756,7 +1002,7 @@ local function getAnimals(r)
 	local rPos   = r.Position
 
 	local function tryAdd(o)
-		if seen[o] or o == ch then return end
+		if seen[o] or o == ch or childSet[o] then return end
 		seen[o] = true
 		if Players:GetPlayerFromCharacter(o) then return end
 		if string.find(o.Name, CHILD_KEY, 1, true) then return end
@@ -1040,7 +1286,7 @@ local function setFixLag(v)
 end
 
 --========================================================
--- AUTO EAT CARROT & ESP TRẺ
+-- AUTO EAT CARROT & ESP TRẺ (EVENT-DRIVEN)
 --========================================================
 
 local eatStatusText = "Chờ bật ăn carrot..."
@@ -1096,7 +1342,7 @@ end
 
 task.spawn(function()
 	while true do
-		task.wait(0.5)
+		task.wait(0.6)
 		if CFG.ESPChild then
 			for m, pair in pairs(espTag) do
 				if not m.Parent then
@@ -1106,39 +1352,46 @@ task.spawn(function()
 					espTag[m] = nil
 				end
 			end
-			for _, m in ipairs(childCache) do
+			for m, _ in pairs(childSet) do
 				if m.Parent and not espTag[m] then
+					local saved = isChildAlreadyRescued(m)
+					local espColor = saved and Color3.fromRGB(100, 255, 130) or Color3.fromRGB(255, 220, 80)
+
 					local hl = Instance.new("Highlight")
-					hl.FillColor        = Color3.fromRGB(255,220,80)
-					hl.OutlineColor     = Color3.fromRGB(255,220,80)
+					hl.FillColor        = espColor
+					hl.OutlineColor     = espColor
 					hl.FillTransparency = 0.45
 					hl.Adornee = m; hl.Parent = m
+
 					local adornPart = partOf(m)
 					local bb, lblConn
 					if adornPart then
 						bb = Instance.new("BillboardGui")
 						bb.Adornee     = adornPart
-						bb.Size        = UDim2.new(0,160,0,44)
+						bb.Size        = UDim2.new(0,170,0,46)
 						bb.StudsOffset = Vector3.new(0,3,0)
 						bb.AlwaysOnTop = true; bb.Parent = adornPart
+
 						local lbl = Instance.new("TextLabel")
 						lbl.Size               = UDim2.new(1,0,1,0)
 						lbl.BackgroundTransparency = 1
-						lbl.TextColor3         = Color3.fromRGB(255,230,80)
+						lbl.TextColor3         = espColor
 						lbl.TextStrokeColor3   = Color3.new(0,0,0)
 						lbl.TextStrokeTransparency = 0.3
 						lbl.Font               = Enum.Font.GothamBold
-						lbl.TextSize           = 14; lbl.Parent = bb
+						lbl.TextSize           = 13; lbl.Parent = bb
+
 						lblConn = RunService.Heartbeat:Connect(function()
 							if not m.Parent or not CFG.ESPChild then
 								lblConn:Disconnect(); return
 							end
 							local rr = root(); local pp = partOf(m)
+							local statusTag = isChildAlreadyRescued(m) and " [Đã cứu]" or ""
 							if rr and pp then
 								local dist = math.floor((pp.Position - rr.Position).Magnitude)
-								lbl.Text = m.Name .. "\n📍 " .. dist .. " studs"
+								lbl.Text = m.Name .. statusTag .. "\n📍 " .. dist .. " studs"
 							else
-								lbl.Text = m.Name
+								lbl.Text = m.Name .. statusTag
 							end
 						end)
 					end
@@ -1152,7 +1405,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- TP, PULL, FUEL & PLANT ACTIONS
+-- TP, PULL, FUEL & PLANT ACTIONS (OPTIMIZED)
 --========================================================
 
 local function tpTo(m)
@@ -1180,7 +1433,10 @@ local function pullAllExact(nameList)
 	local r = root(); if not r then return 0 end
 	local ch = Player.Character
 	local found = {}
-	for _, o in ipairs(Workspace:GetDescendants()) do
+	local itemsFolder = Workspace:FindFirstChild("Items")
+	local searchList  = itemsFolder and itemsFolder:GetDescendants() or Workspace:GetChildren()
+
+	for _, o in ipairs(searchList) do
 		if ch and o:IsDescendantOf(ch) then continue end
 		if Players:GetPlayerFromCharacter(o) then continue end
 		if (o:IsA("Model") or o:IsA("BasePart")) and matchesExact(o.Name, nameList) then
@@ -1226,7 +1482,10 @@ local function dumpFuelToFire()
 	local fp = getFirePart()
 	if not (fp and DragRE and StopDragRE) then return 0 end
 	local ch, count, seen = Player.Character, 0, {}
-	for _, o in ipairs(Workspace:GetDescendants()) do
+	local itemsFolder = Workspace:FindFirstChild("Items")
+	local searchList  = itemsFolder and itemsFolder:GetDescendants() or Workspace:GetChildren()
+
+	for _, o in ipairs(searchList) do
 		if not o:IsA("Model") then continue end
 		if seen[o] then continue end
 		if ch and o:IsDescendantOf(ch) then continue end
@@ -1375,7 +1634,6 @@ function Library:CreateWindow(title)
 		end)
 	end
 
-	-- BOTÃO TOGGLE
 	toggleButton = Instance.new("ImageButton")
 	toggleButton.Size = UDim2.new(0, toggleButtonSize, 0, toggleButtonSize)
 	toggleButton.Position = UDim2.new(0, 10, 0.5, -(toggleButtonSize / 2))
@@ -1400,14 +1658,13 @@ function Library:CreateWindow(title)
 		end
 	end)
 	UIS.InputChanged:Connect(function(input)
-		if draggingBtn and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType.MouseMovement) then
+		if draggingBtn and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
 			local delta = input.Position - dragStartBtn
 			if delta.Magnitude > 5 then movedBtn = true end
 			toggleButton.Position = UDim2.new(startPosBtn.X.Scale, startPosBtn.X.Offset + delta.X, startPosBtn.Y.Scale, startPosBtn.Y.Offset + delta.Y)
 		end
 	end)
 
-	-- MAIN FRAME
 	mainFrame = Instance.new("Frame")
 	mainFrame.Size = UDim2.new(0, 450, 0, 380)
 	mainFrame.Position = UDim2.new(0.5, -225, 0.5, -190)
@@ -1441,7 +1698,6 @@ function Library:CreateWindow(title)
 	strokeMain.Thickness = 1
 	strokeMain.Parent = mainFrame
 
-	-- SIDEBAR
 	sidebarFrame = Instance.new("Frame")
 	sidebarFrame.Size = UDim2.new(0, 90, 1, 0)
 	sidebarFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
@@ -1904,15 +2160,33 @@ end
 -- TAB 3: TRẺ EM
 local TabChild = Win:CreateTab("Trẻ em")
 do
-	local sChild = TabChild:AddSection("CHILDREN ESP & TP")
+	local sAutoRescue = TabChild:AddSection("AUTO CỨU TRẺ VỀ LỬA TRẠI")
+	local sack = getSackTool()
+	sAutoRescue:AddLabel("🎒 Túi hiện tại: " .. (sack and sack.Name or "Chưa có túi"))
+
+	sAutoRescue:AddToggle("Auto cứu trẻ (TP → Balo → Lửa)", CFG.AutoRescueChild, function(v)
+		CFG.AutoRescueChild = v
+		if not v then
+			updateRescueStatus(string.format("Tắt · Đã cứu: %d", totalChildrenSaved))
+		end
+	end)
+	rescueStatusLbl = sAutoRescue:AddLabel(rescueStatusText)
+
+	sAutoRescue:AddButton("🔄 Reset danh sách trẻ đã cứu", function()
+		rescuedChildren  = setmetatable({}, { __mode = "k" })
+		rescuedChildKeys = {}
+		updateRescueStatus("🔄 Đã reset danh sách trẻ đã cứu")
+	end)
+
+	local sChild = TabChild:AddSection("ESP & TP THỦ CÔNG")
 	sChild:AddToggle("ESP Trẻ em", CFG.ESPChild, function(v)
 		CFG.ESPChild = v
 		if not v then clearESPChild() end
 	end)
 
 	local r, list = root(), {}
-	for _, m in ipairs(childCache) do
-		if m.Parent then
+	for m, _ in pairs(childSet) do
+		if m and m.Parent then
 			local p = partOf(m)
 			if p then
 				local d = r and math.floor((p.Position - r.Position).Magnitude) or 0
