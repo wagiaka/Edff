@@ -1,6 +1,6 @@
 --========================================================
 -- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & OPTIMIZED)
--- TP Auto Chop (Break-to-Switch + Tree Tier Filter + Fast Damage Spam)
+-- TP Auto Chop (Break-to-Switch + Exact Tree Name Filter)
 -- Independent Kill Aura + Conflict Warning | Auto Rescue Children
 -- Cached Chest + Ammo + Coins | Zero-Lag Mobile Ready
 --========================================================
@@ -946,7 +946,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- COUNTER, KILL AURA & TP AUTO CHOP (BREAK-TO-SWITCH + TIERS)
+-- COUNTER, KILL AURA & TP AUTO CHOP (EXACT TREE NAMES)
 --========================================================
 
 local hitCounter = 0
@@ -1078,16 +1078,6 @@ local function getAnimals(r)
 end
 
 local skipTree = {}
-local TREE_KEYS = { "Tree","Pine","Oak","Birch","Fir" }
-
-local YOUNG_TREE_KEYS = {
-	"Sapling", "Young", "Small", "Sprout", "Growing", "Baby", "Seedling",
-	"Log", "Plank", "Scrap", "Chair", "Stump", "Fallen"
-}
-
-local BIG_TREE_KEYS = {
-	"Big", "Large", "Giant", "Huge", "Ancient", "Mega", "Elder", "Great"
-}
 
 local function findNilEquivalent(targetName, targetDebugId)
 	if not (targetName and targetDebugId and getnilinstances) then return nil end
@@ -1127,31 +1117,37 @@ local function isTreeBroken(treeModel, treePart)
 	return false
 end
 
--- Chỉ Strong Axe, Chainsaw, Admin Axe mới chặt được cây lớn
+-- Chuẩn hóa chuỗi để so khớp linh hoạt (bỏ khoảng trắng/chữ hoa thường)
+local function normalizeName(str)
+	if type(str) ~= "string" then return "" end
+	return string.lower(string.gsub(str, "%s+", ""))
+end
+
+local function isSmallTreeName(name)
+	local n = normalizeName(name)
+	return n == "smalltree" or string.find(n, "smalltree", 1, true) ~= nil
+end
+
+local function isBigTreeName(name)
+	local n = normalizeName(name)
+	return n == "treebig1" or n == "treebig2"
+		or string.find(n, "treebig1", 1, true) ~= nil
+		or string.find(n, "treebig2", 1, true) ~= nil
+end
+
+-- Chỉ Strong Axe, Chainsaw, Admin Axe mới chặt được treebig1 và treebig2
 local function canChopBigTree(tool)
 	if not tool then return false end
 	return HEAVY_AXES[tool.Name] == true
 end
 
--- Phân loại cây: "young" (không chặt), "big" (cần rìu xịn), "normal" (mọi rìu)
+-- Trả về:
+--   "normal" -> Small Tree (mọi rìu chặt được)
+--   "big"    -> treebig1, treebig 2 (chỉ Strong Axe, Chainsaw, Admin Axe)
+--   nil      -> không phải loại cây hợp lệ hoặc đã gãy
 local function classifyTree(treeModel)
 	if not treeModel or not treeModel.Parent or not treeModel:IsA("Model") then
 		return nil
-	end
-	if not hasKey(treeModel.Name, TREE_KEYS) then
-		return nil
-	end
-
-	-- 1. Cây con / cây đang phát triển -> không thể chặt
-	if hasKey(treeModel.Name, YOUNG_TREE_KEYS) then
-		return "young"
-	end
-	local stage = treeModel:GetAttribute("Stage") or treeModel:GetAttribute("Growth")
-	if type(stage) == "string" and hasKey(stage, YOUNG_TREE_KEYS) then
-		return "young"
-	end
-	if type(stage) == "number" and stage < 1 then
-		return "young"
 	end
 
 	local p = partOf(treeModel)
@@ -1159,23 +1155,15 @@ local function classifyTree(treeModel)
 		return nil
 	end
 
-	-- 2. Kiểm tra kích thước tổng thể của Model cây
-	local okSize, size = pcall(function() return treeModel:GetExtentsSize() end)
-	if okSize and size then
-		if size.Y < 9 then
-			return "young"
-		end
-		if size.Y >= 32 or math.max(size.X, size.Z) >= 18 then
-			return "big"
-		end
+	if isSmallTreeName(treeModel.Name) then
+		return "normal"
 	end
 
-	-- 3. Kiểm tra từ khóa cây lớn
-	if hasKey(treeModel.Name, BIG_TREE_KEYS) then
+	if isBigTreeName(treeModel.Name) then
 		return "big"
 	end
 
-	return "normal"
+	return nil
 end
 
 local function getTrees(r, maxRadius, tool)
@@ -1190,11 +1178,11 @@ local function getTrees(r, maxRadius, tool)
 		if skipTree[t] and now < skipTree[t] then return end
 
 		local treeType = classifyTree(t)
-		if not treeType or treeType == "young" then
-			return -- Bỏ qua cây con / cây đang phát triển
+		if not treeType then
+			return
 		end
 		if treeType == "big" and not allowBig then
-			return -- Bỏ qua cây lớn nếu không cầm Strong Axe / Chainsaw / Admin Axe
+			return -- Không có Strong Axe / Chainsaw / Admin Axe thì bỏ qua treebig1 & treebig 2
 		end
 
 		local p = partOf(t); if not p then return end
