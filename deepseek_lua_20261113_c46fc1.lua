@@ -1,6 +1,6 @@
 --========================================================
 -- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE)
--- Chest -> Loot At Chest Pos (2s, Cached) | Chair Scrap | Auto Coins
+-- Chest -> Loot At Chest Pos (2s) + Auto Scan & Claim Ammo
 -- PC + MOBILE
 --========================================================
 
@@ -66,6 +66,7 @@ local FUEL_EXACT = {
 }
 local CHEST_KEYS = { "Chest", "Crate", "Supply", "Loot" }
 local COIN_KEYS  = { "Coin" }
+local AMMO_KEYS  = { "Ammo", "Bullet", "Shell", "Arrow", "Dart", "Rocket", "Cartridge" }
 local IGNORE_LOOT_KEYS = {
 	"Tree","Pine","Oak","Birch","Fir","Bush","Foliage","Wall","Floor","Ground",
 	"Terrain","Campfire","MainFire","Spawn","Part","Baseplate","Hitbox"
@@ -192,7 +193,7 @@ local function getNilByName(name)
 end
 
 --========================================================
--- AUTO OPEN CHEST -> LOOT AT EXACT CHEST POSITION (2s)
+-- AUTO OPEN CHEST -> LOOT AT CHEST POS + AUTO SCAN AMMO (2s)
 --========================================================
 
 local chestLootStatusText = "Chờ bật tự động mở & nhặt rương..."
@@ -203,14 +204,18 @@ local openedChestDone = setmetatable({}, { __mode = "k" })
 local failedChestAt   = {}
 local lootedItems     = setmetatable({}, { __mode = "k" })
 local failedLootAt    = {}
+local claimedAmmo     = setmetatable({}, { __mode = "k" })
+local failedAmmoAt    = {}
 
 local CHEST_FAIL_COOLDOWN = 45
 local LOOT_FAIL_COOLDOWN  = 35
+local AMMO_FAIL_COOLDOWN  = 15
 local CHEST_LOOT_RADIUS   = 12
 local STEP_WAIT_SECONDS   = 2
 
-local totalChestsOpened = 0
-local totalItemsLooted  = 0
+local totalChestsOpened  = 0
+local totalItemsLooted   = 0
+local totalAmmoCollected = 0
 
 local function updateChestLootStatus(txt)
 	chestLootStatusText = txt
@@ -252,6 +257,108 @@ local function initChestCache()
 		cachedChests[o] = nil
 		failedChestAt[o] = nil
 	end)
+end
+
+-- Tự động quét mọi loại đạn (từ getnilinstances & Workspace) không cần fix tên
+local cachedAmmoList = {}
+local lastAmmoScanAt = 0
+local AMMO_SCAN_INTERVAL = 2.5
+
+local function isAmmoObject(obj)
+	if not obj then return false end
+	local okName, name = pcall(function() return obj.Name end)
+	if not okName or type(name) ~= "string" then return false end
+	if hasKey(name, IGNORE_LOOT_KEYS) or hasKey(name, CHEST_KEYS) or hasKey(name, COIN_KEYS) then
+		return false
+	end
+	return hasKey(name, AMMO_KEYS)
+end
+
+local function refreshAmmoCache(force)
+	local now = os.clock()
+	if not force and (now - lastAmmoScanAt) < AMMO_SCAN_INTERVAL then
+		return cachedAmmoList
+	end
+	lastAmmoScanAt = now
+
+	local found, seen = {}, {}
+	local function tryAdd(o)
+		if not o or seen[o] then return end
+		if claimedAmmo[o] then return end
+		if isAmmoObject(o) then
+			seen[o] = true
+			table.insert(found, o)
+		end
+	end
+
+	if getnilinstances then
+		local ok, nilList = pcall(getnilinstances)
+		if ok and nilList then
+			for i = 1, #nilList do
+				tryAdd(nilList[i])
+				if i % 1000 == 0 then task.wait() end
+			end
+		end
+	end
+
+	local itemsFolder = Workspace:FindFirstChild("Items")
+	if itemsFolder then
+		for _, o in ipairs(itemsFolder:GetDescendants()) do
+			tryAdd(o)
+		end
+	end
+
+	cachedAmmoList = found
+	return cachedAmmoList
+end
+
+local function tryClaimSingleAmmo(ammoObj)
+	if not ConsumeRF or not ammoObj then return false end
+	local okAlive = pcall(function() return ammoObj.Name end)
+	if not okAlive then return false end
+
+	local done, ok, res = false, false, nil
+	task.spawn(function()
+		ok, res = pcall(ConsumeRF.InvokeServer, ConsumeRF, ammoObj)
+		done = true
+	end)
+
+	local timeout = 0
+	while not done and timeout < 0.5 do
+		task.wait(0.05)
+		timeout += 0.05
+	end
+
+	if not done or not ok or res == false then
+		return false
+	end
+	return true
+end
+
+local function collectScannedAmmo()
+	if not ConsumeRF then return 0 end
+	local list = refreshAmmoCache(false)
+	if #list == 0 then return 0 end
+
+	local now = os.clock()
+	local claimed = 0
+	for i = 1, math.min(#list, 12) do
+		if not CFG.AutoChestAndLoot then break end
+		local ammoObj = list[i]
+		if claimedAmmo[ammoObj] then continue end
+		local failT = failedAmmoAt[ammoObj]
+		if failT and (now - failT) < AMMO_FAIL_COOLDOWN then continue end
+
+		if tryClaimSingleAmmo(ammoObj) then
+			claimedAmmo[ammoObj] = true
+			claimed += 1
+			totalAmmoCollected += 1
+		else
+			failedAmmoAt[ammoObj] = os.clock()
+		end
+		task.wait(0.05)
+	end
+	return claimed
 end
 
 local function isChestSkipped(chest, now)
@@ -430,9 +537,12 @@ local function processNextChestStep()
 		end
 	end
 
+	-- Nếu hết rương thì vẫn tranh thủ quét & nhận đạn còn sót
 	if not targetChest or not targetPos then
+		local ammoGot = collectScannedAmmo()
 		updateChestLootStatus(
-			string.format("✅ Hết rương · Rương: %d | Đồ: %d", totalChestsOpened, totalItemsLooted)
+			string.format("✅ Hết rương · Rương: %d | Đồ: %d | Đạn: %d (+%d)",
+				totalChestsOpened, totalItemsLooted, totalAmmoCollected, ammoGot)
 		)
 		return
 	end
@@ -441,7 +551,10 @@ local function processNextChestStep()
 	local openedOk = openSingleChest(targetChest)
 	if not openedOk or not targetChest.Parent then
 		failedChestAt[targetChest] = os.clock()
-		updateChestLootStatus("⏭️ Bỏ qua rương lỗi: " .. tostring(targetChest.Name))
+		local ammoGot = collectScannedAmmo()
+		updateChestLootStatus(
+			string.format("⏭️ Bỏ qua rương lỗi (%s) · Đạn +%d", tostring(targetChest.Name), ammoGot)
+		)
 		return
 	end
 
@@ -451,21 +564,23 @@ local function processNextChestStep()
 	local currentChestPart = partOf(targetChest)
 	local scanPos = currentChestPart and currentChestPart.Position or targetPos
 
-	updateChestLootStatus("🎒 Đang nhặt đồ rương: " .. tostring(targetChest.Name))
+	updateChestLootStatus("🎒 Đang nhặt đồ & đạn: " .. tostring(targetChest.Name))
 	local grabbed, skipped = lootItemsAtChest(targetChest, scanPos)
+	local ammoGot = collectScannedAmmo()
 
-	if grabbed > 0 or targetChest.Parent then
+	if grabbed > 0 or ammoGot > 0 or targetChest.Parent then
 		openedChestDone[targetChest] = true
 		totalChestsOpened += 1
 		updateChestLootStatus(
-			string.format("📦 #%d (%s) +%d đồ (Bỏ %d) · Tổng: %d",
-				totalChestsOpened, tostring(targetChest.Name), grabbed, skipped, totalItemsLooted)
+			string.format("📦 #%d (%s) +%d đồ +%d đạn · Tổng: %d đồ / %d đạn",
+				totalChestsOpened, tostring(targetChest.Name), grabbed, ammoGot,
+				totalItemsLooted, totalAmmoCollected)
 		)
 	else
 		failedChestAt[targetChest] = os.clock()
 		updateChestLootStatus(
-			string.format("⏭️ Bỏ qua rương trống/lỗi (%s) · Tổng: %d",
-				tostring(targetChest.Name), totalItemsLooted)
+			string.format("⏭️ Bỏ qua rương trống (%s) · Tổng: %d đồ / %d đạn",
+				tostring(targetChest.Name), totalItemsLooted, totalAmmoCollected)
 		)
 	end
 end
@@ -1720,11 +1835,16 @@ do
 
 	sCombat:AddSlider("Delay (x10ms)", 5, 60, math.floor(CFG.Delay * 100), function(v) CFG.Delay = v / 100 end)
 
-	local sChest = TabMain:AddSection("RƯƠNG & ĐỒNG XU")
-	sChest:AddToggle("Mở & nhặt từng rương (2s)", CFG.AutoChestAndLoot, function(v)
+	local sChest = TabMain:AddSection("RƯƠNG, ĐẠN & ĐỒNG XU")
+	sChest:AddToggle("Mở rương + nhặt đồ & đạn (2s)", CFG.AutoChestAndLoot, function(v)
 		CFG.AutoChestAndLoot = v
-		if not v then
-			updateChestLootStatus(string.format("Tắt · Rương: %d | Đồ: %d", totalChestsOpened, totalItemsLooted))
+		if v then
+			task.spawn(function() refreshAmmoCache(true) end)
+		else
+			updateChestLootStatus(
+				string.format("Tắt · Rương: %d | Đồ: %d | Đạn: %d",
+					totalChestsOpened, totalItemsLooted, totalAmmoCollected)
+			)
 		end
 	end)
 	chestLootStatusLbl = sChest:AddLabel(chestLootStatusText)
