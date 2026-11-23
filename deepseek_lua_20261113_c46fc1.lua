@@ -1,6 +1,7 @@
 --========================================================
 -- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & OPTIMIZED)
--- TP Auto Chop + Independent Kill Aura | Auto Rescue Children
+-- TP Auto Chop (Break-to-Switch + Tree Tier Filter)
+-- Independent Kill Aura + Conflict Warning | Auto Rescue Children
 -- Cached Chest + Ammo + Coins | Zero-Lag Mobile Ready
 --========================================================
 
@@ -50,6 +51,11 @@ local BagDropRE     = Remotes and Remotes:FindFirstChild("RequestBagDropItem")
 
 local AXES = {
 	"Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
+}
+local HEAVY_AXES = {
+	["Strong Axe"] = true,
+	["Chainsaw"]   = true,
+	["Admin Axe"]  = true,
 }
 local MELEE_WEAPONS = {
 	"Spear","Honey Spear","Morningstar","Katana","Laser Sword","Ice Sword",
@@ -167,7 +173,10 @@ end
 
 local function getChopTool()
 	local inv, char = Player:FindFirstChild("Inventory"), Player.Character
-	return findFromList(AXES, inv, char)
+	-- Ưu tiên rìu mạnh nhất trước để chặt được cả cây lớn
+	local priorityAxes = { "Admin Axe", "Chainsaw", "Strong Axe", "Ice Axe", "Good Axe", "Old Axe" }
+	return findFromList(priorityAxes, inv, char)
+		or findFromList(AXES, inv, char)
 		or findFromList(MELEE_WEAPONS, inv, char)
 		or getFallbackTool(inv, char)
 end
@@ -926,7 +935,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- COUNTER, KILL AURA & TP AUTO CHOP (INDEPENDENT LOOPS)
+-- COUNTER, KILL AURA & TP AUTO CHOP (BREAK-TO-SWITCH + TIERS)
 --========================================================
 
 local hitCounter = 0
@@ -1030,28 +1039,114 @@ end
 local skipTree = {}
 local TREE_KEYS = { "Tree","Pine","Oak","Birch","Fir" }
 
-local function isValidTreeModel(o)
-	if not o or not o.Parent or not o:IsA("Model") then return false end
-	if not hasKey(o.Name, TREE_KEYS) then return false end
-	if hasKey(o.Name, { "Sapling", "Log", "Plank", "Scrap", "Chair" }) then return false end
-	return partOf(o) ~= nil
+local YOUNG_TREE_KEYS = {
+	"Sapling", "Young", "Small", "Sprout", "Growing", "Baby", "Seedling",
+	"Log", "Plank", "Scrap", "Chair", "Stump", "Fallen"
+}
+
+local BIG_TREE_KEYS = {
+	"Big", "Large", "Giant", "Huge", "Ancient", "Mega", "Elder", "Great"
+}
+
+-- Kiểm tra xem cây đã gãy hoặc bị phá hủy chưa
+local function isTreeBroken(treeModel, treePart)
+	if not treeModel or not treeModel.Parent then return true end
+	if not treePart or not treePart.Parent then return true end
+
+	local hpAttr = treeModel:GetAttribute("Health") or treeModel:GetAttribute("HP")
+	if type(hpAttr) == "number" and hpAttr <= 0 then return true end
+
+	local hpVal = treeModel:FindFirstChild("Health", true) or treeModel:FindFirstChild("HP", true)
+	if hpVal and hpVal:IsA("ValueBase") and type(hpVal.Value) == "number" and hpVal.Value <= 0 then
+		return true
+	end
+
+	local h = treeModel:FindFirstChildWhichIsA("Humanoid", true)
+	if h and h.Health <= 0 then return true end
+
+	-- Khi cây gãy đổ trong game thường bỏ neo Anchored
+	if treePart:IsA("BasePart") and not treePart.Anchored then
+		return true
+	end
+
+	return false
 end
 
-local function getTrees(r, maxRadius)
+-- Chỉ Strong Axe, Chainsaw, Admin Axe mới chặt được cây lớn
+local function canChopBigTree(tool)
+	if not tool then return false end
+	return HEAVY_AXES[tool.Name] == true
+end
+
+-- Phân loại cây: "young" (không chặt), "big" (cần rìu xịn), "normal" (mọi rìu)
+local function classifyTree(treeModel)
+	if not treeModel or not treeModel.Parent or not treeModel:IsA("Model") then
+		return nil
+	end
+	if not hasKey(treeModel.Name, TREE_KEYS) then
+		return nil
+	end
+
+	-- 1. Cây con / cây đang phát triển -> không thể chặt
+	if hasKey(treeModel.Name, YOUNG_TREE_KEYS) then
+		return "young"
+	end
+	local stage = treeModel:GetAttribute("Stage") or treeModel:GetAttribute("Growth")
+	if type(stage) == "string" and hasKey(stage, YOUNG_TREE_KEYS) then
+		return "young"
+	end
+	if type(stage) == "number" and stage < 1 then
+		return "young"
+	end
+
+	local p = partOf(treeModel)
+	if not p or isTreeBroken(treeModel, p) then
+		return nil
+	end
+
+	-- 2. Kiểm tra kích thước tổng thể của Model cây
+	local okSize, size = pcall(function() return treeModel:GetExtentsSize() end)
+	if okSize and size then
+		if size.Y < 9 then
+			return "young"
+		end
+		if size.Y >= 32 or math.max(size.X, size.Z) >= 18 then
+			return "big"
+		end
+	end
+
+	-- 3. Kiểm tra từ khóa cây lớn
+	if hasKey(treeModel.Name, BIG_TREE_KEYS) then
+		return "big"
+	end
+
+	return "normal"
+end
+
+local function getTrees(r, maxRadius, tool)
 	local out = {}
 	local useLimit = type(maxRadius) == "number" and maxRadius > 0
 	local maxDSq = useLimit and (maxRadius * maxRadius) or math.huge
 	local rPos   = r.Position
 	local now    = os.clock()
+	local allowBig = canChopBigTree(tool)
 
 	local function tryAddTree(t)
 		if skipTree[t] and now < skipTree[t] then return end
-		if not isValidTreeModel(t) then return end
+
+		local treeType = classifyTree(t)
+		if not treeType or treeType == "young" then
+			return -- Bỏ qua cây con / cây đang phát triển
+		end
+		if treeType == "big" and not allowBig then
+			return -- Bỏ qua cây lớn nếu không cầm Strong Axe / Chainsaw / Admin Axe
+		end
+
 		local p = partOf(t); if not p then return end
 		local d = p.Position - rPos
 		local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
 		if dSq <= maxDSq then
-			table.insert(out, { m = t, p = p, dSq = dSq })
+			table.insert(out, { m = t, p = p, dSq = dSq, treeType = treeType })
 		end
 	end
 
@@ -1092,28 +1187,41 @@ local function tpToTreeAndChop(treeModel, treePart, tool)
 
 	local targetPos = treePart.Position
 	r.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, -3.5), targetPos)
-	task.wait(0.12)
+	task.wait(0.1)
 
 	equipToolSafe(tool)
-	local anyHit = false
-	for _ = 1, 4 do
-		if not CFG.AutoChop or not treeModel.Parent or not treePart.Parent then
-			break
-		end
+
+	local swings = 0
+	local maxSwings = 35 -- Giới hạn an toàn tránh kẹt cây lỗi map
+	local failedHits = 0
+
+	-- Chặt liên tục cho tới khi cây gãy hẳn mới chuyển cây khác
+	while CFG.AutoChop and not isTreeBroken(treeModel, treePart) and swings < maxSwings do
 		local rr = root()
-		if rr then
-			if (rr.Position - targetPos).Magnitude > 14 then
-				rr.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, -3.5), targetPos)
-			end
-			if hitOnce(tool, treeModel, treePart) then
-				anyHit = true
+		local currentTool = getChopTool()
+		if not (rr and currentTool) then break end
+
+		local curTreePos = treePart.Position
+		if (rr.Position - curTreePos).Magnitude > 12 then
+			rr.CFrame = CFrame.new(curTreePos + Vector3.new(0, 3, -3.5), curTreePos)
+		end
+
+		local hitOk = hitOnce(currentTool, treeModel, treePart)
+		if hitOk then
+			failedHits = 0
+		else
+			failedHits += 1
+			if failedHits >= 5 then
+				break
 			end
 		end
+
+		swings += 1
 		task.wait(math.max(CFG.Delay, 0.12))
 	end
-	unequipToolSafe(tool)
 
-	return anyHit or (not treeModel.Parent)
+	unequipToolSafe(tool)
+	return isTreeBroken(treeModel, treePart)
 end
 
 -- Luồng riêng cho Kill Aura
@@ -1140,20 +1248,24 @@ task.spawn(function()
 		if CFG.AutoChop then
 			local r, tool = root(), getChopTool()
 			if r and tool then
-				local trees = getTrees(r, CFG.ChopRadius)
+				local trees = getTrees(r, CFG.ChopRadius, tool)
 				if #trees == 0 then
-					trees = getTrees(r, nil)
+					trees = getTrees(r, nil, tool)
 				end
 				if #trees > 0 then
 					local chosen = trees[1]
-					local ok = false
+					local broken = false
 					pcall(function()
-						ok = tpToTreeAndChop(chosen.m, chosen.p, tool)
+						broken = tpToTreeAndChop(chosen.m, chosen.p, tool)
 					end)
-					skipTree[chosen.m] = os.clock() + (ok and 3.5 or 1.5)
+					if broken then
+						skipTree[chosen.m] = os.clock() + 60
+					else
+						skipTree[chosen.m] = os.clock() + 5
+					end
 				end
 			end
-			task.wait(0.25)
+			task.wait(0.15)
 		else
 			task.wait(0.25)
 		end
@@ -2127,23 +2239,54 @@ holdBtn(0,  "▲", function(v) padUp   = v end)
 holdBtn(68, "▼", function(v) padDown = v end)
 
 --========================================================
--- BUILD MENU
+-- BUILD MENU & CONFLICT WARNING
 --========================================================
 
 local Win = Library:CreateWindow("SUNSET")
+
+local chopWarnLbl = nil
+local function refreshChopCombatWarning()
+	local bothOn = CFG.KillAura and CFG.AutoChop
+	if chopWarnLbl and chopWarnLbl.Parent then
+		if bothOn then
+			chopWarnLbl.Text = "⚠️ Đang bật cả Kill Aura & Auto Chop (dễ xung đột vũ khí)!"
+			chopWarnLbl.TextColor3 = Color3.fromRGB(255, 85, 85)
+		else
+			chopWarnLbl.Text = "✅ Không xung đột vũ khí"
+			chopWarnLbl.TextColor3 = Color3.fromRGB(140, 230, 140)
+		end
+	end
+	if bothOn and Win and Win.Notify then
+		Win:Notify(
+			"⚠️ Cảnh báo xung đột vũ khí",
+			"Đang bật cả Kill Aura và TP Auto Chop. Nên tắt Kill Aura khi farm gỗ để chặt mượt hơn!",
+			5
+		)
+	end
+end
 
 -- TAB 1: CHÍNH
 local TabMain = Win:CreateTab("Chính")
 do
 	local sCombat = TabMain:AddSection("COMBAT & FARM")
 	local tool = getKillTool()
-	sCombat:AddLabel("🗡 Vũ khí: " .. (tool and tool.Name or "Không có"))
+	local chopTool = getChopTool()
+	sCombat:AddLabel("🗡 Vũ khí: " .. (tool and tool.Name or "Không có") .. " | 🪓 Rìu: " .. (chopTool and chopTool.Name or "Không có"))
 
-	sCombat:AddToggle("Kill Aura", CFG.KillAura, function(v) CFG.KillAura = v end)
+	sCombat:AddToggle("Kill Aura", CFG.KillAura, function(v)
+		CFG.KillAura = v
+		refreshChopCombatWarning()
+	end)
 	sCombat:AddSlider("Kill Radius", 10, 500, CFG.KillRadius, function(v) CFG.KillRadius = v end)
 
-	sCombat:AddToggle("TP Auto Chop (Chặt cây)", CFG.AutoChop, function(v) CFG.AutoChop = v end)
+	sCombat:AddToggle("TP Auto Chop (Chặt gãy mới đổi)", CFG.AutoChop, function(v)
+		CFG.AutoChop = v
+		refreshChopCombatWarning()
+	end)
 	sCombat:AddSlider("Chop Radius", 10, 500, CFG.ChopRadius, function(v) CFG.ChopRadius = v end)
+
+	chopWarnLbl = sCombat:AddLabel("✅ Không xung đột vũ khí")
+	chopWarnLbl.TextColor3 = Color3.fromRGB(140, 230, 140)
 
 	sCombat:AddSlider("Delay (x10ms)", 5, 60, math.floor(CFG.Delay * 100), function(v) CFG.Delay = v / 100 end)
 
