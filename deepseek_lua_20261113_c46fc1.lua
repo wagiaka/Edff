@@ -1,6 +1,6 @@
 --========================================================
 -- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & OPTIMIZED)
--- TP Auto Chop (Break-to-Switch + Tree Tier Filter)
+-- TP Auto Chop (Break-to-Switch + Tree Filter by Axe)
 -- Independent Kill Aura + Conflict Warning | Auto Rescue Children
 -- Cached Chest + Ammo + Coins | Zero-Lag Mobile Ready
 --========================================================
@@ -51,11 +51,6 @@ local BagDropRE     = Remotes and Remotes:FindFirstChild("RequestBagDropItem")
 
 local AXES = {
 	"Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
-}
-local HEAVY_AXES = {
-	["Strong Axe"] = true,
-	["Chainsaw"]   = true,
-	["Admin Axe"]  = true,
 }
 local MELEE_WEAPONS = {
 	"Spear","Honey Spear","Morningstar","Katana","Laser Sword","Ice Sword",
@@ -935,7 +930,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- COUNTER, KILL AURA & TP AUTO CHOP (BREAK-TO-SWITCH + TIERS)
+-- COUNTER, KILL AURA & TP AUTO CHOP (BREAK-TO-SWITCH + AXE FILTER)
 --========================================================
 
 local hitCounter = 0
@@ -1037,16 +1032,6 @@ local function getAnimals(r)
 end
 
 local skipTree = {}
-local TREE_KEYS = { "Tree","Pine","Oak","Birch","Fir" }
-
-local YOUNG_TREE_KEYS = {
-	"Sapling", "Young", "Small", "Sprout", "Growing", "Baby", "Seedling",
-	"Log", "Plank", "Scrap", "Chair", "Stump", "Fallen"
-}
-
-local BIG_TREE_KEYS = {
-	"Big", "Large", "Giant", "Huge", "Ancient", "Mega", "Elder", "Great"
-}
 
 -- Kiểm tra xem cây đã gãy hoặc bị phá hủy chưa
 local function isTreeBroken(treeModel, treePart)
@@ -1072,81 +1057,63 @@ local function isTreeBroken(treeModel, treePart)
 	return false
 end
 
--- Chỉ Strong Axe, Chainsaw, Admin Axe mới chặt được cây lớn
-local function canChopBigTree(tool)
-	if not tool then return false end
-	return HEAVY_AXES[tool.Name] == true
+-- Nhận diện loại rìu
+local function getAxeType(tool)
+	if not tool then return nil end
+
+	local name = tool.Name:lower()
+
+	if name:find("admin axe", 1, true) then
+		return "Admin Axe"
+	elseif name:find("chainsaw", 1, true) then
+		return "Chainsaw"
+	elseif name:find("strong axe", 1, true) then
+		return "Strong Axe"
+	end
+
+	return "Normal"
 end
 
--- Phân loại cây: "young" (không chặt), "big" (cần rìu xịn), "normal" (mọi rìu)
-local function classifyTree(treeModel)
-	if not treeModel or not treeModel.Parent or not treeModel:IsA("Model") then
-		return nil
-	end
-	if not hasKey(treeModel.Name, TREE_KEYS) then
-		return nil
+-- Kiểm tra cây có thể chặt bằng rìu hiện tại
+local function canChopTree(tree, tool)
+	if not tree or not tool then return false end
+
+	local name = tree.Name:lower()
+	local axeType = getAxeType(tool)
+
+	if name == "small tree" then
+		return true
 	end
 
-	-- 1. Cây con / cây đang phát triển -> không thể chặt
-	if hasKey(treeModel.Name, YOUNG_TREE_KEYS) then
-		return "young"
-	end
-	local stage = treeModel:GetAttribute("Stage") or treeModel:GetAttribute("Growth")
-	if type(stage) == "string" and hasKey(stage, YOUNG_TREE_KEYS) then
-		return "young"
-	end
-	if type(stage) == "number" and stage < 1 then
-		return "young"
+	if name == "treebig1" or name == "treebig2" then
+		return axeType == "Strong Axe"
+			or axeType == "Chainsaw"
+			or axeType == "Admin Axe"
 	end
 
-	local p = partOf(treeModel)
-	if not p or isTreeBroken(treeModel, p) then
-		return nil
-	end
-
-	-- 2. Kiểm tra kích thước tổng thể của Model cây
-	local okSize, size = pcall(function() return treeModel:GetExtentsSize() end)
-	if okSize and size then
-		if size.Y < 9 then
-			return "young"
-		end
-		if size.Y >= 32 or math.max(size.X, size.Z) >= 18 then
-			return "big"
-		end
-	end
-
-	-- 3. Kiểm tra từ khóa cây lớn
-	if hasKey(treeModel.Name, BIG_TREE_KEYS) then
-		return "big"
-	end
-
-	return "normal"
+	return false
 end
 
+-- Lấy danh sách cây có thể chặt trong bán kính, gần nhất đứng đầu
 local function getTrees(r, maxRadius, tool)
 	local out = {}
-	local useLimit = type(maxRadius) == "number" and maxRadius > 0
-	local maxDSq = useLimit and (maxRadius * maxRadius) or math.huge
-	local rPos   = r.Position
-	local now    = os.clock()
-	local allowBig = canChopBigTree(tool)
+	local maxDSq = maxRadius * maxRadius
+	local rPos = r.Position
+	local now = os.clock()
 
 	local function tryAddTree(t)
+		if not t:IsA("Model") then return end
 		if skipTree[t] and now < skipTree[t] then return end
+		if not canChopTree(t, tool) then return end
 
-		local treeType = classifyTree(t)
-		if not treeType or treeType == "young" then
-			return -- Bỏ qua cây con / cây đang phát triển
-		end
-		if treeType == "big" and not allowBig then
-			return -- Bỏ qua cây lớn nếu không cầm Strong Axe / Chainsaw / Admin Axe
-		end
+		local p = partOf(t)
+		if not p then return end
+		if isTreeBroken(t, p) then return end
 
-		local p = partOf(t); if not p then return end
 		local d = p.Position - rPos
-		local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
+		local dSq = d.X * d.X + d.Y * d.Y + d.Z * d.Z
 		if dSq <= maxDSq then
-			table.insert(out, { m = t, p = p, dSq = dSq, treeType = treeType })
+			table.insert(out, { m = t, p = p, dSq = dSq })
 		end
 	end
 
@@ -1249,20 +1216,13 @@ task.spawn(function()
 			local r, tool = root(), getChopTool()
 			if r and tool then
 				local trees = getTrees(r, CFG.ChopRadius, tool)
-				if #trees == 0 then
-					trees = getTrees(r, nil, tool)
-				end
 				if #trees > 0 then
 					local chosen = trees[1]
 					local broken = false
 					pcall(function()
 						broken = tpToTreeAndChop(chosen.m, chosen.p, tool)
 					end)
-					if broken then
-						skipTree[chosen.m] = os.clock() + 60
-					else
-						skipTree[chosen.m] = os.clock() + 5
-					end
+					skipTree[chosen.m] = os.clock() + (broken and 60 or 5)
 				end
 			end
 			task.wait(0.15)
