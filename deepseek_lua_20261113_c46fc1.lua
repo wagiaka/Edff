@@ -1,5 +1,5 @@
 --========================================================
--- OLLIE UI V10 | DARK BLUE (COMPLETE + CHAIR IN SCRAP)
+-- OLLIE UI V10 | DARK BLUE (AUTO OPEN CHEST + AUTO COLLECT COINS)
 -- Two Column | Smooth Animation | Image Support
 -- PC + MOBILE
 --========================================================
@@ -23,9 +23,9 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 --========================================================
 
 local Images = {
-    Logo       = "rbxassetid://0", -- Logo trên thanh Header (góc trái)
-    Banner     = "rbxassetid://0", -- Banner đầu tab "Chính"
-    Background = "rbxassetid://0", -- Ảnh nền mờ sau các ô chức năng
+    Logo       = "rbxassetid://0",
+    Banner     = "rbxassetid://0",
+    Background = "rbxassetid://0",
 }
 
 local function normalizeAssetId(id)
@@ -87,16 +87,18 @@ end
 -- REMOTES & GAME DATA
 --========================================================
 
-local Remotes    = RS:WaitForChild("RemoteEvents", 10)
-local EquipRE    = Remotes and Remotes:FindFirstChild("EquipItemHandle")
-local UnequipRE  = Remotes and Remotes:FindFirstChild("UnequipItemHandle")
-local DamageRF   = Remotes and Remotes:FindFirstChild("ToolDamageObject")
-local MapRE      = Remotes and Remotes:FindFirstChild("MapCellsDiscovered")
-local DragRE     = Remotes and Remotes:FindFirstChild("RequestStartDraggingItem")
-local StopDragRE = Remotes and Remotes:FindFirstChild("StopDraggingItem")
-local HitSoundRE = Remotes and Remotes:FindFirstChild("PlayEnemyHitSound")
-local PlantRE    = Remotes and Remotes:FindFirstChild("RequestPlantItem")
-local ConsumeRF  = Remotes and Remotes:FindFirstChild("RequestConsumeItem")
+local Remotes       = RS:WaitForChild("RemoteEvents", 10)
+local EquipRE       = Remotes and Remotes:FindFirstChild("EquipItemHandle")
+local UnequipRE     = Remotes and Remotes:FindFirstChild("UnequipItemHandle")
+local DamageRF      = Remotes and Remotes:FindFirstChild("ToolDamageObject")
+local MapRE         = Remotes and Remotes:FindFirstChild("MapCellsDiscovered")
+local DragRE        = Remotes and Remotes:FindFirstChild("RequestStartDraggingItem")
+local StopDragRE    = Remotes and Remotes:FindFirstChild("StopDraggingItem")
+local HitSoundRE    = Remotes and Remotes:FindFirstChild("PlayEnemyHitSound")
+local PlantRE       = Remotes and Remotes:FindFirstChild("RequestPlantItem")
+local ConsumeRF     = Remotes and Remotes:FindFirstChild("RequestConsumeItem")
+local OpenChestRE   = Remotes and Remotes:FindFirstChild("RequestOpenItemChest")
+local CollectCoinRF = Remotes and Remotes:FindFirstChild("RequestCollectCoints")
 
 local AXES = {
     "Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
@@ -116,16 +118,20 @@ local FUEL_EXACT = {
     "Log","Chair","Biofuel","Coal",
     "Purple Fur Tuft","Fuel Canister","Oil Barrel",
 }
+local CHEST_KEYS = { "Chest", "Crate", "Supply", "Loot" }
+local COIN_KEYS  = { "Coin" }
 
 local CFG = {
-    Speed=false,      WalkSpeed=40,
-    Jump=false,       JumpPower=90,
-    Fly=false,        FlySpeed=60,
+    Speed=false,            WalkSpeed=40,
+    Jump=false,             JumpPower=90,
+    Fly=false,              FlySpeed=60,
     Noclip=false,
-    KillAura=false,   KillRadius=150,
-    AutoChop=false,   ChopRadius=130,
+    KillAura=false,         KillRadius=150,
+    AutoChop=false,         ChopRadius=130,
     AutoDrop=false,
     AutoEat=false,
+    AutoOpenChest=false,
+    AutoCollectCoins=false,
     ESPChild=false,
     Fullbright=false,
     FixLag=false,
@@ -141,6 +147,7 @@ local CHILD_KEY   = "Lost Child"
 --========================================================
 
 local function hasKey(name, keys)
+    if type(name) ~= "string" then return false end
     local n = string.lower(name)
     for _, k in ipairs(keys) do
         if string.find(n, string.lower(k), 1, true) then return true end
@@ -233,6 +240,161 @@ local function getNilByName(name)
     end
     return out
 end
+
+--========================================================
+-- AUTO OPEN ALL CHESTS & AUTO COLLECT ALL COINS
+--========================================================
+
+local openedChestAt = {}
+local chestStatusText = "Chờ bật tự động mở rương..."
+local chestStatusLbl  = nil
+
+local function updateChestStatus(txt, col)
+    chestStatusText = txt
+    if chestStatusLbl and chestStatusLbl.Parent then
+        chestStatusLbl.Text = txt
+        if col then chestStatusLbl.TextColor3 = col end
+    end
+end
+
+local function scanAllChests()
+    local chests, seen = {}, {}
+    local function tryAdd(o)
+        if seen[o] then return end
+        if (o:IsA("Model") or o:IsA("BasePart")) and hasKey(o.Name, CHEST_KEYS) then
+            seen[o] = true
+            table.insert(chests, o)
+        end
+    end
+
+    local itemsFolder = Workspace:FindFirstChild("Items")
+    if itemsFolder then
+        for _, o in ipairs(itemsFolder:GetDescendants()) do
+            tryAdd(o)
+        end
+    end
+    for _, o in ipairs(Workspace:GetDescendants()) do
+        tryAdd(o)
+    end
+    return chests
+end
+
+local function openAllChestsOnce()
+    if not OpenChestRE then
+        updateChestStatus("❌ Thiếu remote RequestOpenItemChest", Color3.fromRGB(255, 100, 100))
+        return 0
+    end
+    local chests = scanAllChests()
+    if #chests == 0 then
+        updateChestStatus("⚠️ Không tìm thấy rương nào trên map", Theme.Amber)
+        return 0
+    end
+
+    local now = os.clock()
+    local opened = 0
+    for _, chest in ipairs(chests) do
+        if not CFG.AutoOpenChest then break end
+        if chest and chest.Parent and (openedChestAt[chest] or 0) + 12 <= now then
+            openedChestAt[chest] = now
+            local ok = pcall(OpenChestRE.FireServer, OpenChestRE, chest)
+            if ok then opened += 1 end
+            task.wait(0.06)
+        end
+    end
+
+    updateChestStatus(
+        string.format("📦 Tìm thấy %d rương · Đã mở %d rương", #chests, opened),
+        Theme.Green
+    )
+    return opened
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1.5)
+        if CFG.AutoOpenChest then
+            pcall(openAllChestsOnce)
+        end
+    end
+end)
+
+local coinStatusText = "Chờ bật tự động nhặt xu..."
+local coinStatusLbl  = nil
+local totalCollectedCoins = 0
+
+local function updateCoinStatus(txt, col)
+    coinStatusText = txt
+    if coinStatusLbl and coinStatusLbl.Parent then
+        coinStatusLbl.Text = txt
+        if col then coinStatusLbl.TextColor3 = col end
+    end
+end
+
+local function scanAllCoins()
+    local coins, seen = {}, {}
+    local function tryAdd(obj)
+        if seen[obj] then return end
+        local okName, name = pcall(function() return obj.Name end)
+        if okName and hasKey(name, COIN_KEYS) then
+            seen[obj] = true
+            table.insert(coins, obj)
+        end
+    end
+
+    for _, o in ipairs(Workspace:GetDescendants()) do
+        tryAdd(o)
+    end
+
+    if getnilinstances then
+        local ok, nilList = pcall(getnilinstances)
+        if ok and nilList then
+            for _, obj in ipairs(nilList) do
+                tryAdd(obj)
+            end
+        end
+    end
+
+    return coins
+end
+
+local function collectAllCoinsOnce()
+    if not CollectCoinRF then
+        updateCoinStatus("❌ Thiếu remote RequestCollectCoints", Color3.fromRGB(255, 100, 100))
+        return 0
+    end
+
+    local coins = scanAllCoins()
+    if #coins == 0 then
+        updateCoinStatus("⚠️ Chưa thấy đồng xu nào (Tổng: " .. totalCollectedCoins .. ")", Theme.Amber)
+        return 0
+    end
+
+    local collected = 0
+    for _, coin in ipairs(coins) do
+        if not CFG.AutoCollectCoins then break end
+        local ok = pcall(CollectCoinRF.InvokeServer, CollectCoinRF, coin)
+        if ok then
+            collected += 1
+            totalCollectedCoins += 1
+        end
+        task.wait(0.05)
+    end
+
+    updateCoinStatus(
+        string.format("🪙 Đã nhặt %d đợt này (Tổng: %d)", collected, totalCollectedCoins),
+        Theme.Green
+    )
+    return collected
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1.2)
+        if CFG.AutoCollectCoins then
+            pcall(collectAllCoinsOnce)
+        end
+    end
+end)
 
 --========================================================
 -- CACHE TRẺ & COUNTER
@@ -1110,7 +1272,7 @@ Padding.PaddingBottom = UDim.new(0, 10)
 Padding.Parent = Content
 
 --========================================================
--- DRAG & OPEN / CLOSE (KHÔNG BAO GIỜ KẸT ANIMATION)
+-- DRAG & OPEN / CLOSE
 --========================================================
 
 local dragging = false
@@ -1247,7 +1409,9 @@ holdBtn(68, "▼", function(v) padDown = v end)
 --========================================================
 
 local function ClearContent()
-    eatStatusLbl = nil
+    eatStatusLbl   = nil
+    chestStatusLbl = nil
+    coinStatusLbl  = nil
     for _, obj in ipairs(Content:GetChildren()) do
         if obj ~= ContentLayout and obj ~= Padding then
             obj:Destroy()
@@ -1462,7 +1626,7 @@ local function ActionButton(text, callback)
 end
 
 --========================================================
--- PAGE SYSTEM (MƯỢT, KHÔNG BAO GIỜ KẸT)
+-- PAGE SYSTEM
 --========================================================
 
 local Pages = {}
@@ -1548,6 +1712,28 @@ AddPage("Chính", "HOME", function()
     Slider("Delay (x10ms)", 5, 60, math.floor(CFG.Delay * 100), function(value)
         CFG.Delay = value / 100
     end)
+
+    Section("RƯƠNG & ĐỒNG XU")
+
+    Toggle("📦 Tự động mở toàn bộ rương", CFG.AutoOpenChest, function(enabled)
+        CFG.AutoOpenChest = enabled
+        if enabled then
+            task.spawn(openAllChestsOnce)
+        else
+            updateChestStatus("Tắt", Theme.SubText)
+        end
+    end)
+    chestStatusLbl = InfoBox(chestStatusText)
+
+    Toggle("🪙 Tự động nhặt toàn bộ xu", CFG.AutoCollectCoins, function(enabled)
+        CFG.AutoCollectCoins = enabled
+        if enabled then
+            task.spawn(collectAllCoinsOnce)
+        else
+            updateCoinStatus("Tắt (Tổng: " .. totalCollectedCoins .. ")", Theme.SubText)
+        end
+    end)
+    coinStatusLbl = InfoBox(coinStatusText)
 
     Section("SINH TỒN & TRỒNG CÂY")
 
@@ -1830,5 +2016,5 @@ OpenTab("Chính", true)
 OpenMenu()
 
 print("================================")
-print(" OLLIE UI V10 COMPLETE LOADED ✓")
+print(" OLLIE UI V10 + CHEST & COINS ✓")
 print("================================")
