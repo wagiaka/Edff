@@ -1,5 +1,5 @@
 --========================================================
--- OLLIE UI V10 | DARK BLUE (AUTO LOOT NO-SPAM + CHEST + COINS)
+-- OLLIE UI V10 | DARK BLUE (DEEP CHEST + LOOT FLOW & COINS)
 -- Two Column | Smooth Animation | Image Support
 -- PC + MOBILE
 --========================================================
@@ -135,8 +135,7 @@ local CFG = {
     AutoChop=false,         ChopRadius=130,
     AutoDrop=false,
     AutoEat=false,
-    AutoOpenChest=false,
-    AutoLootChest=false,
+    AutoChestAndLoot=false,
     AutoCollectCoins=false,
     ESPChild=false,
     Fullbright=false,
@@ -248,18 +247,30 @@ local function getNilByName(name)
 end
 
 --========================================================
--- AUTO OPEN CHESTS, AUTO LOOT (NO-SPAM) & AUTO COINS
+-- DEEP AUTO OPEN CHEST -> LOOT THAT CHEST (2s DELAY, SKIP BAD)
 --========================================================
 
-local openedChestAt = {}
-local chestStatusText = "Chờ bật tự động mở rương..."
-local chestStatusLbl  = nil
+local chestLootStatusText = "Chờ bật tự động mở & nhặt rương..."
+local chestLootStatusLbl  = nil
 
-local function updateChestStatus(txt, col)
-    chestStatusText = txt
-    if chestStatusLbl and chestStatusLbl.Parent then
-        chestStatusLbl.Text = txt
-        if col then chestStatusLbl.TextColor3 = col end
+local openedChestDone = setmetatable({}, { __mode = "k" })
+local failedChestAt   = {}
+local lootedItems     = setmetatable({}, { __mode = "k" })
+local failedLootAt    = {}
+
+local CHEST_FAIL_COOLDOWN = 45
+local LOOT_FAIL_COOLDOWN  = 35
+local LOOT_RADIUS_STUDS   = 24
+local STEP_WAIT_SECONDS   = 2
+
+local totalChestsOpened = 0
+local totalItemsLooted  = 0
+
+local function updateChestLootStatus(txt, col)
+    chestLootStatusText = txt
+    if chestLootStatusLbl and chestLootStatusLbl.Parent then
+        chestLootStatusLbl.Text = txt
+        if col then chestLootStatusLbl.TextColor3 = col end
     end
 end
 
@@ -285,71 +296,27 @@ local function scanAllChests()
     return chests
 end
 
-local function openAllChestsOnce()
-    if not OpenChestRE then
-        updateChestStatus("❌ Thiếu remote RequestOpenItemChest", Color3.fromRGB(255, 100, 100))
-        return 0
-    end
-    local chests = scanAllChests()
-    if #chests == 0 then
-        updateChestStatus("⚠️ Không tìm thấy rương nào trên map", Theme.Amber)
-        return 0
-    end
-
-    local now = os.clock()
-    local opened = 0
-    for _, chest in ipairs(chests) do
-        if not CFG.AutoOpenChest then break end
-        if chest and chest.Parent and (openedChestAt[chest] or 0) + 12 <= now then
-            openedChestAt[chest] = now
-            local ok = pcall(OpenChestRE.FireServer, OpenChestRE, chest)
-            if ok then opened += 1 end
-            task.wait(0.06)
-        end
-    end
-
-    updateChestStatus(
-        string.format("📦 Tìm thấy %d rương · Đã mở %d rương", #chests, opened),
-        Theme.Green
-    )
-    return opened
-end
-
-task.spawn(function()
-    while true do
-        task.wait(1.5)
-        if CFG.AutoOpenChest then
-            pcall(openAllChestsOnce)
-        end
-    end
-end)
-
-local failedLootAt = {}
-local lootedItems  = setmetatable({}, { __mode = "k" })
-local lootStatusText = "Chờ bật tự động nhặt đồ rương..."
-local lootStatusLbl  = nil
-local totalLootedCount = 0
-local FAIL_COOLDOWN = 25
-
-local function updateLootStatus(txt, col)
-    lootStatusText = txt
-    if lootStatusLbl and lootStatusLbl.Parent then
-        lootStatusLbl.Text = txt
-        if col then lootStatusLbl.TextColor3 = col end
-    end
-end
-
-local function isSkippedLoot(obj, now)
-    if not obj or not obj.Parent then return true end
-    if lootedItems[obj] then return true end
-    local failTime = failedLootAt[obj]
-    if failTime and (now - failTime) < FAIL_COOLDOWN then
+local function isChestSkipped(chest, now)
+    if not chest or not chest.Parent then return true end
+    if openedChestDone[chest] then return true end
+    local failT = failedChestAt[chest]
+    if failT and (now - failT) < CHEST_FAIL_COOLDOWN then
         return true
     end
     return false
 end
 
-local function isValidLootCandidate(obj, chests)
+local function isLootSkipped(item, now)
+    if not item or not item.Parent then return true end
+    if lootedItems[item] then return true end
+    local failT = failedLootAt[item]
+    if failT and (now - failT) < LOOT_FAIL_COOLDOWN then
+        return true
+    end
+    return false
+end
+
+local function isValidChestLoot(obj, targetChest, allChests)
     if not obj or not obj.Parent then return false end
     local ch = Player.Character
     if ch and obj:IsDescendantOf(ch) then return false end
@@ -357,10 +324,13 @@ local function isValidLootCandidate(obj, chests)
     if inv and obj:IsDescendantOf(inv) then return false end
     if Players:GetPlayerFromCharacter(obj) then return false end
 
-    for _, chest in ipairs(chests) do
-        if obj == chest or obj:IsDescendantOf(chest) then
+    for _, c in ipairs(allChests) do
+        if obj == c or obj:IsDescendantOf(c) then
             return false
         end
+    end
+    if obj == targetChest or obj:IsDescendantOf(targetChest) then
+        return false
     end
 
     local name = obj.Name
@@ -378,25 +348,12 @@ local function isValidLootCandidate(obj, chests)
     return false
 end
 
-local function scanChestLoot(now)
-    local candidates, seen = {}, {}
-    local chests = scanAllChests()
-    local chestParts = {}
-    for _, c in ipairs(chests) do
-        local p = partOf(c)
-        if p then table.insert(chestParts, p.Position) end
-    end
+local function scanLootForChest(targetChest, allChests, now)
+    local chestPart = partOf(targetChest)
+    if not chestPart then return {} end
+    local cPos = chestPart.Position
 
-    local function nearAnyChest(pos)
-        if #chestParts == 0 then return true end
-        for _, cp in ipairs(chestParts) do
-            if (pos - cp).Magnitude <= 28 then
-                return true
-            end
-        end
-        return false
-    end
-
+    local out, seen = {}, {}
     local scanRoots = {}
     local itemsFolder = Workspace:FindFirstChild("Items")
     if itemsFolder then table.insert(scanRoots, itemsFolder) end
@@ -405,22 +362,29 @@ local function scanChestLoot(now)
     for _, rootFolder in ipairs(scanRoots) do
         for _, o in ipairs(rootFolder:GetDescendants()) do
             if seen[o] then continue end
-            if isSkippedLoot(o, now) then continue end
-            if not isValidLootCandidate(o, chests) then continue end
+            if isLootSkipped(o, now) then continue end
+            if not isValidChestLoot(o, targetChest, allChests) then continue end
 
             local p = partOf(o)
-            if p and nearAnyChest(p.Position) then
+            if p and (p.Position - cPos).Magnitude <= LOOT_RADIUS_STUDS then
                 seen[o] = true
-                table.insert(candidates, o)
+                table.insert(out, o)
             end
         end
-        if #candidates > 0 then break end
+        if #out > 0 then break end
     end
 
-    return candidates
+    table.sort(out, function(a, b)
+        local pa, pb = partOf(a), partOf(b)
+        if not pa then return false end
+        if not pb then return true end
+        return (pa.Position - cPos).Magnitude < (pb.Position - cPos).Magnitude
+    end)
+
+    return out
 end
 
-local function tryLootItem(item)
+local function tryLootSingleItem(item)
     if not HotbarItemRF then return false end
     local inv = Player:FindFirstChild("Inventory")
     local beforeCount = inv and #inv:GetChildren() or 0
@@ -440,54 +404,121 @@ local function tryLootItem(item)
     return false
 end
 
-local function lootChestItemsOnce()
-    if not HotbarItemRF then
-        updateLootStatus("❌ Thiếu remote RequestHotbarItem", Color3.fromRGB(255, 100, 100))
-        return 0
-    end
+local function openSingleChest(chest)
+    if not OpenChestRE or not chest or not chest.Parent then return false end
+    local ok = pcall(OpenChestRE.FireServer, OpenChestRE, chest)
+    return ok == true
+end
 
+local function lootItemsOfSingleChest(chest, allChests)
     local now = os.clock()
-    local candidates = scanChestLoot(now)
-    if #candidates == 0 then
-        updateLootStatus(
-            string.format("🎒 Không có món nhặt được (Đã nhặt: %d)", totalLootedCount),
-            Theme.SubText
-        )
-        return 0
+    local items = scanLootForChest(chest, allChests, now)
+    if #items == 0 then
+        return 0, 0
     end
 
     local grabbed, skipped = 0, 0
-    for i = 1, math.min(#candidates, 12) do
-        if not CFG.AutoLootChest then break end
-        local item = candidates[i]
-        if isSkippedLoot(item, os.clock()) then continue end
+    for i = 1, math.min(#items, 15) do
+        if not CFG.AutoChestAndLoot then break end
+        local item = items[i]
+        if isLootSkipped(item, os.clock()) then continue end
 
-        if tryLootItem(item) then
+        if tryLootSingleItem(item) then
             lootedItems[item] = true
             grabbed += 1
-            totalLootedCount += 1
+            totalItemsLooted += 1
         else
             failedLootAt[item] = os.clock()
             skipped += 1
         end
-        task.wait(0.1)
+        task.wait(0.08)
+    end
+    return grabbed, skipped
+end
+
+local function processNextChestStep()
+    if not OpenChestRE then
+        updateChestLootStatus("❌ Thiếu remote RequestOpenItemChest", Color3.fromRGB(255, 100, 100))
+        return
+    end
+    if not HotbarItemRF then
+        updateChestLootStatus("❌ Thiếu remote RequestHotbarItem", Color3.fromRGB(255, 100, 100))
+        return
     end
 
-    updateLootStatus(
-        string.format("🎒 Nhặt +%d · Bỏ qua %d · Tổng: %d", grabbed, skipped, totalLootedCount),
-        grabbed > 0 and Theme.Green or Theme.Amber
-    )
-    return grabbed
+    local allChests = scanAllChests()
+    if #allChests == 0 then
+        updateChestLootStatus("⚠️ Không thấy rương · Đã mở " .. totalChestsOpened .. " | Nhặt " .. totalItemsLooted, Theme.Amber)
+        return
+    end
+
+    local now = os.clock()
+    local targetChest = nil
+    for _, c in ipairs(allChests) do
+        if not isChestSkipped(c, now) then
+            targetChest = c
+            break
+        end
+    end
+
+    if not targetChest then
+        updateChestLootStatus(
+            string.format("✅ Hết rương khả dụng · Rương: %d | Đồ: %d", totalChestsOpened, totalItemsLooted),
+            Theme.Green
+        )
+        return
+    end
+
+    -- Bước 1: Mở đúng 1 rương
+    updateChestLootStatus("📦 Đang mở rương: " .. tostring(targetChest.Name) .. "...", Theme.AccentLight)
+    local openedOk = openSingleChest(targetChest)
+    if not openedOk or not targetChest.Parent then
+        failedChestAt[targetChest] = os.clock()
+        updateChestLootStatus("⏭️ Bỏ qua rương lỗi: " .. tostring(targetChest.Name), Theme.Amber)
+        return
+    end
+
+    -- Chờ ngắn cho rương bật/rơi đồ sau khi mở
+    task.wait(0.35)
+    if not CFG.AutoChestAndLoot then return end
+
+    -- Bước 2: Chỉ khi mở rương đó mới nhặt đồ của chính rương đó
+    updateChestLootStatus("🎒 Đang nhặt đồ trong rương: " .. tostring(targetChest.Name) .. "...", Theme.AccentLight)
+    local grabbed, skipped = lootItemsOfSingleChest(targetChest, allChests)
+
+    if grabbed > 0 or targetChest.Parent then
+        openedChestDone[targetChest] = true
+        totalChestsOpened += 1
+        updateChestLootStatus(
+            string.format("📦 Mở #%d (%s) · Nhặt +%d (Bỏ %d) · Tổng đồ: %d",
+                totalChestsOpened, tostring(targetChest.Name), grabbed, skipped, totalItemsLooted),
+            Theme.Green
+        )
+    else
+        failedChestAt[targetChest] = os.clock()
+        updateChestLootStatus(
+            string.format("⏭️ Bỏ qua rương không nhặt được (%s) · Tổng đồ: %d",
+                tostring(targetChest.Name), totalItemsLooted),
+            Theme.Amber
+        )
+    end
 end
 
 task.spawn(function()
     while true do
-        task.wait(1.4)
-        if CFG.AutoLootChest then
-            pcall(lootChestItemsOnce)
+        if CFG.AutoChestAndLoot then
+            pcall(processNextChestStep)
+            -- Chờ đúng 2s sau mỗi lần mở và nhặt
+            task.wait(STEP_WAIT_SECONDS)
+        else
+            task.wait(0.5)
         end
     end
 end)
+
+--========================================================
+-- AUTO COLLECT ALL COINS
+--========================================================
 
 local coinStatusText = "Chờ bật tự động nhặt xu..."
 local coinStatusLbl  = nil
@@ -1580,10 +1611,9 @@ holdBtn(68, "▼", function(v) padDown = v end)
 --========================================================
 
 local function ClearContent()
-    eatStatusLbl   = nil
-    chestStatusLbl = nil
-    lootStatusLbl  = nil
-    coinStatusLbl  = nil
+    eatStatusLbl       = nil
+    chestLootStatusLbl = nil
+    coinStatusLbl      = nil
     for _, obj in ipairs(Content:GetChildren()) do
         if obj ~= ContentLayout and obj ~= Padding then
             obj:Destroy()
@@ -1887,25 +1917,16 @@ AddPage("Chính", "HOME", function()
 
     Section("RƯƠNG & ĐỒNG XU")
 
-    Toggle("📦 Tự động mở toàn bộ rương", CFG.AutoOpenChest, function(enabled)
-        CFG.AutoOpenChest = enabled
-        if enabled then
-            task.spawn(openAllChestsOnce)
-        else
-            updateChestStatus("Tắt", Theme.SubText)
+    Toggle("📦 Tự động mở & nhặt từng rương (2s)", CFG.AutoChestAndLoot, function(enabled)
+        CFG.AutoChestAndLoot = enabled
+        if not enabled then
+            updateChestLootStatus(
+                string.format("Tắt · Rương: %d | Đồ: %d", totalChestsOpened, totalItemsLooted),
+                Theme.SubText
+            )
         end
     end)
-    chestStatusLbl = InfoBox(chestStatusText)
-
-    Toggle("🎒 Tự động nhặt đồ rương (Bỏ qua đồ lỗi)", CFG.AutoLootChest, function(enabled)
-        CFG.AutoLootChest = enabled
-        if enabled then
-            task.spawn(lootChestItemsOnce)
-        else
-            updateLootStatus("Tắt (Tổng: " .. totalLootedCount .. ")", Theme.SubText)
-        end
-    end)
-    lootStatusLbl = InfoBox(lootStatusText)
+    chestLootStatusLbl = InfoBox(chestLootStatusText)
 
     Toggle("🪙 Tự động nhặt toàn bộ xu", CFG.AutoCollectCoins, function(enabled)
         CFG.AutoCollectCoins = enabled
@@ -2198,5 +2219,5 @@ OpenTab("Chính", true)
 OpenMenu()
 
 print("================================")
-print(" OLLIE UI V10 + AUTO LOOT ✓")
+print(" OLLIE UI V10 DEEP CHEST+LOOT ✓")
 print("================================")
