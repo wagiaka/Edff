@@ -1,6 +1,6 @@
 --========================================================
 -- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & OPTIMIZED)
--- Auto Rescue Children (TP -> Bag -> Campfire -> Drop)
+-- TP Auto Chop + Independent Kill Aura | Auto Rescue Children
 -- Cached Chest + Ammo + Coins | Zero-Lag Mobile Ready
 --========================================================
 
@@ -253,7 +253,6 @@ local function initChildCache()
 		end)
 	end
 
-	-- Quét sâu 1 lần duy nhất chia nhỏ để bắt trẻ nằm trong subfolder
 	task.spawn(function()
 		local all = Workspace:GetDescendants()
 		for i = 1, #all do
@@ -272,7 +271,7 @@ initChildCache()
 local rescueStatusText   = "Chờ bật tự động cứu trẻ..."
 local rescueStatusLbl    = nil
 local rescuedChildren    = setmetatable({}, { __mode = "k" })
-local rescuedChildKeys   = {} -- Lưu thêm theo DebugId/Name để chống trùng tuyệt đối
+local rescuedChildKeys   = {}
 local totalChildrenSaved = 0
 
 local function updateRescueStatus(txt)
@@ -295,7 +294,6 @@ local function isChildAlreadyRescued(child)
 	local key = getChildUniqueKey(child)
 	if key and rescuedChildKeys[key] then return true end
 
-	-- Nếu đứa trẻ đã đứng ngay sát lửa trại (<= 22 studs) thì cũng coi như đã ở trại
 	local fp = getFirePart()
 	local cp = partOf(child)
 	if fp and cp and (cp.Position - fp.Position).Magnitude <= 22 then
@@ -347,17 +345,14 @@ local function rescueSingleChild(child)
 	local childName = child.Name
 	updateRescueStatus("🏃 Đang TP tới: " .. childName)
 
-	-- 1. Dịch chuyển sát đứa trẻ
 	r.CFrame = CFrame.new(cp.Position + Vector3.new(0, 3, 2))
 	task.wait(0.25)
 	if not CFG.AutoRescueChild then return false end
 
-	-- 2. Bỏ đứa trẻ vào balo (thử cả object trong ItemBag nếu game tạo sẵn hoặc chính model trong Workspace)
 	updateRescueStatus("🎒 Đang cất vào balo: " .. childName)
 	local bagTarget = findItemInBag(childName) or child
 	local storeOk = pcall(BagStoreRF.InvokeServer, BagStoreRF, sack, bagTarget)
 	if not storeOk then
-		-- Thử lại với target còn lại nếu lần đầu chưa khớp
 		local altTarget = (bagTarget == child) and findItemInBag(childName) or child
 		if altTarget then
 			pcall(BagStoreRF.InvokeServer, BagStoreRF, sack, altTarget)
@@ -366,7 +361,6 @@ local function rescueSingleChild(child)
 	task.wait(0.25)
 	if not CFG.AutoRescueChild then return false end
 
-	-- 3. Dịch chuyển về lửa trại
 	updateRescueStatus("🔥 Đang TP về lửa trại...")
 	r = root()
 	if r and fp and fp.Parent then
@@ -374,7 +368,6 @@ local function rescueSingleChild(child)
 	end
 	task.wait(0.25)
 
-	-- 4. Thả đứa trẻ ra tại lửa trại
 	updateRescueStatus("📤 Đang thả trẻ tại lửa trại...")
 	local dropTarget = (child and child.Parent) and child or findItemInBag(childName)
 	if dropTarget then
@@ -382,7 +375,6 @@ local function rescueSingleChild(child)
 	end
 	task.wait(0.2)
 
-	-- 5. Đánh dấu đã cứu để không TP lại lần nữa
 	markChildRescued(child)
 	totalChildrenSaved += 1
 	updateRescueStatus(string.format("✅ Đã cứu %s (Tổng: %d)", childName, totalChildrenSaved))
@@ -890,7 +882,6 @@ local function collectAllCoinsOnce()
 		end
 	end
 
-	-- Quét thêm trong nil instances nếu có
 	if getnilinstances then
 		local ok, nilList = pcall(getnilinstances)
 		if ok and nilList then
@@ -920,7 +911,7 @@ local function collectAllCoinsOnce()
 	end
 
 	updateCoinStatus(
-		string.format("🪙 Đã nhặt +%d xu (Tổng: %d)", collected, totalCollectedCoins)
+		string.format("🪙 Đã nhặt +%d xu (Tổng: " .. totalCollectedCoins .. ")", collected)
 	)
 	return collected
 end
@@ -935,7 +926,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- COUNTER & COMBAT (KILL AURA / AUTO CHOP)
+-- COUNTER, KILL AURA & TP AUTO CHOP (INDEPENDENT LOOPS)
 --========================================================
 
 local hitCounter = 0
@@ -959,40 +950,47 @@ local function nextId()
 end
 
 local function hitOnce(tool, target, p)
-	if not DamageRF then return false end
+	if not DamageRF or not target or not target.Parent or not p or not p.Parent then
+		return false
+	end
 	local ok = pcall(DamageRF.InvokeServer, DamageRF,
 		target, tool, nextId(), CFrame.new(p.Position), false)
 	if HitSoundRE then
 		pcall(HitSoundRE.FireServer, HitSoundRE, "FireAllClients", target, tool)
 	end
-	return ok
+	return ok == true
 end
 
-local function swing(tool, target, p)
-	if not (EquipRE and UnequipRE and DamageRF) then return false end
-	pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
-	task.wait(0.03)
-	local ok = hitOnce(tool, target, p)
-	task.wait(0.025)
-	pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
-	return ok
+local function equipToolSafe(tool)
+	if EquipRE and tool then
+		pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
+		task.wait(0.03)
+	end
+end
+
+local function unequipToolSafe(tool)
+	if UnequipRE and tool then
+		pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
+		task.wait(0.025)
+	end
 end
 
 local function swingBatch(tool, targets)
 	if not (EquipRE and UnequipRE and DamageRF) or #targets == 0 then return end
-	pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
-	task.wait(0.03)
+	equipToolSafe(tool)
 	local limit = math.min(#targets, MAX_KILL_PER_CYCLE)
 	for i = 1, limit do
 		if not CFG.KillAura then break end
 		local t = targets[i]
 		if t.m and t.m.Parent and t.p and t.p.Parent then
 			local h = t.m:FindFirstChildWhichIsA("Humanoid", true)
-			if h and h.Health > 0 then hitOnce(tool, t.m, t.p) end
+			if h and h.Health > 0 then
+				hitOnce(tool, t.m, t.p)
+			end
 		end
 		if i < limit then task.wait(0.05) end
 	end
-	pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
+	unequipToolSafe(tool)
 end
 
 local SCAN_FOLDERS = { "Characters","Enemies","Mobs","NPCs" }
@@ -1030,76 +1028,134 @@ local function getAnimals(r)
 end
 
 local skipTree = {}
-local TREE_KEYS = { "Tree","Pine","Oak","Birch","Fir","Bush","Foliage" }
+local TREE_KEYS = { "Tree","Pine","Oak","Birch","Fir" }
 
-local function getTrees(r)
+local function isValidTreeModel(o)
+	if not o or not o.Parent or not o:IsA("Model") then return false end
+	if not hasKey(o.Name, TREE_KEYS) then return false end
+	if hasKey(o.Name, { "Sapling", "Log", "Plank", "Scrap", "Chair" }) then return false end
+	return partOf(o) ~= nil
+end
+
+local function getTrees(r, maxRadius)
 	local out = {}
-	local maxDSq = CFG.ChopRadius * CFG.ChopRadius
+	local useLimit = type(maxRadius) == "number" and maxRadius > 0
+	local maxDSq = useLimit and (maxRadius * maxRadius) or math.huge
 	local rPos   = r.Position
 	local now    = os.clock()
 
-	local function scanFolder(folder)
-		if not folder then return end
-		for _, t in ipairs(folder:GetChildren()) do
-			if not (skipTree[t] and now < skipTree[t]) then
-				local p = partOf(t)
-				if p then
-					local d = p.Position - rPos
-					local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
-					if dSq <= maxDSq then
-						table.insert(out, {m=t, p=p, dSq=dSq})
-					end
-				end
-			end
+	local function tryAddTree(t)
+		if skipTree[t] and now < skipTree[t] then return end
+		if not isValidTreeModel(t) then return end
+		local p = partOf(t); if not p then return end
+		local d = p.Position - rPos
+		local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
+		if dSq <= maxDSq then
+			table.insert(out, { m = t, p = p, dSq = dSq })
 		end
 	end
 
 	local map = Workspace:FindFirstChild("Map")
-	scanFolder(map and map:FindFirstChild("Foliage"))
-	scanFolder(map and map:FindFirstChild("Trees"))
-	scanFolder(Workspace:FindFirstChild("Foliage"))
-	scanFolder(Workspace:FindFirstChild("Trees"))
+	local folders = {
+		map and map:FindFirstChild("Foliage"),
+		map and map:FindFirstChild("Trees"),
+		Workspace:FindFirstChild("Foliage"),
+		Workspace:FindFirstChild("Trees"),
+	}
+
+	for _, folder in ipairs(folders) do
+		if folder then
+			for _, t in ipairs(folder:GetChildren()) do
+				tryAddTree(t)
+			end
+		end
+	end
 
 	if #out == 0 then
 		local scanRoot = map or Workspace
 		for _, o in ipairs(scanRoot:GetDescendants()) do
-			if o:IsA("Model") and hasKey(o.Name, TREE_KEYS)
-				and not (skipTree[o] and now < skipTree[o]) then
-				local p = partOf(o)
-				if p then
-					local d = p.Position - rPos
-					local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
-					if dSq <= maxDSq then
-						table.insert(out, {m=o, p=p, dSq=dSq})
-					end
-				end
+			if o:IsA("Model") then
+				tryAddTree(o)
 			end
 		end
 	end
-	table.sort(out, function(a,b) return a.dSq < b.dSq end)
+
+	table.sort(out, function(a, b) return a.dSq < b.dSq end)
 	return out
 end
 
+local function tpToTreeAndChop(treeModel, treePart, tool)
+	local r = root()
+	if not (r and treeModel and treeModel.Parent and treePart and treePart.Parent) then
+		return false
+	end
+
+	local targetPos = treePart.Position
+	r.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, -3.5), targetPos)
+	task.wait(0.12)
+
+	equipToolSafe(tool)
+	local anyHit = false
+	for _ = 1, 4 do
+		if not CFG.AutoChop or not treeModel.Parent or not treePart.Parent then
+			break
+		end
+		local rr = root()
+		if rr then
+			if (rr.Position - targetPos).Magnitude > 14 then
+				rr.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, -3.5), targetPos)
+			end
+			if hitOnce(tool, treeModel, treePart) then
+				anyHit = true
+			end
+		end
+		task.wait(math.max(CFG.Delay, 0.12))
+	end
+	unequipToolSafe(tool)
+
+	return anyHit or (not treeModel.Parent)
+end
+
+-- Luồng riêng cho Kill Aura
 task.spawn(function()
 	while true do
-		task.wait(CFG.Delay)
 		if CFG.KillAura then
 			local r, tool = root(), getKillTool()
 			if r and tool then
 				local targets = getAnimals(r)
-				if #targets > 0 then swingBatch(tool, targets) end
+				if #targets > 0 then
+					pcall(swingBatch, tool, targets)
+				end
 			end
+			task.wait(CFG.Delay)
+		else
+			task.wait(0.25)
 		end
+	end
+end)
+
+-- Luồng riêng cho TP Auto Chop
+task.spawn(function()
+	while true do
 		if CFG.AutoChop then
 			local r, tool = root(), getChopTool()
 			if r and tool then
-				local trees = getTrees(r)
+				local trees = getTrees(r, CFG.ChopRadius)
+				if #trees == 0 then
+					trees = getTrees(r, nil)
+				end
 				if #trees > 0 then
-					local t = trees[1]
-					local ok = swing(tool, t.m, t.p)
-					skipTree[t.m] = os.clock() + (ok and 3.0 or 1.5)
+					local chosen = trees[1]
+					local ok = false
+					pcall(function()
+						ok = tpToTreeAndChop(chosen.m, chosen.p, tool)
+					end)
+					skipTree[chosen.m] = os.clock() + (ok and 3.5 or 1.5)
 				end
 			end
+			task.wait(0.25)
+		else
+			task.wait(0.25)
 		end
 	end
 end)
@@ -2086,7 +2142,7 @@ do
 	sCombat:AddToggle("Kill Aura", CFG.KillAura, function(v) CFG.KillAura = v end)
 	sCombat:AddSlider("Kill Radius", 10, 500, CFG.KillRadius, function(v) CFG.KillRadius = v end)
 
-	sCombat:AddToggle("Auto Chop", CFG.AutoChop, function(v) CFG.AutoChop = v end)
+	sCombat:AddToggle("TP Auto Chop (Chặt cây)", CFG.AutoChop, function(v) CFG.AutoChop = v end)
 	sCombat:AddSlider("Chop Radius", 10, 500, CFG.ChopRadius, function(v) CFG.ChopRadius = v end)
 
 	sCombat:AddSlider("Delay (x10ms)", 5, 60, math.floor(CFG.Delay * 100), function(v) CFG.Delay = v / 100 end)
