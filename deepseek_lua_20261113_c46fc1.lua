@@ -1,8 +1,5 @@
 --========================================================
--- SUNSET UI + OLLIE 99 NIGHTS (FULL COMPLETE EDITION)
--- Updated Scrap/Grinder/Chest Filters + Direct Item TP
--- Continuous Campfire Fuel (No Log/Chair) + High-Speed Chest
--- TP Auto Chop + Independent Kill Aura + Auto Rescue Child
+-- SUNSET UI + OLLIE 99 NIGHTS (STRICT CHAIR/LOG SCRAPPER & IN-CHEST LOOT)
 --========================================================
 
 local Players      = game:GetService("Players")
@@ -30,7 +27,7 @@ for _, name in ipairs({"OllieUI", "OllieMenu", "ollie_v9", "SunsetUI"}) do
 end
 
 --========================================================
--- REMOTES & GAME DATA (99 NIGHTS FILTERS)
+-- REMOTES & GAME DATA
 --========================================================
 
 local Remotes       = RS:WaitForChild("RemoteEvents", 10)
@@ -71,36 +68,18 @@ local SCRAPPER_KEYS = {
 	"Scrapper", "Grinder", "Recycler", "Anvil",
 }
 
+-- CHỈ ĐÚNG 2 TÊN: "Chair" và "Log"
 local SCRAP_EXACT = {
-	"Bolt", "Sheet Metal", "Tyre", "Tires & Engines",
-	"Metal Chair", "Chair", "Log",
-	"Broken Fan", "Broken Radio", "Old Radio",
-	"Broken Microwave", "Washing Machine", "Old Car Engine",
-	"UFO Junk", "UFO Component", "UFO Scrap",
-	"Cultist Experiment", "Cultist Prototype",
-	"Obsidiron Shard", "Obsidiron Ingot", "Obsidiron",
-}
-
-local SCRAP_KEYS = {
-	"Bolt", "Sheet Metal", "Tyre", "Tire", "Engine",
-	"Metal Chair", "Chair", "Log",
-	"Broken Fan", "Broken Radio", "Radio",
-	"Broken Microwave", "Microwave",
-	"Washing Machine", "Scrap", "Iron", "Metal",
-	"UFO Junk", "UFO Component", "UFO",
-	"Cultist Experiment", "Cultist Prototype",
-	"Obsidiron",
+	"Chair",
+	"Log",
 }
 
 local SCRAP_ITEMS = {
-	"Log", "Chair", "Metal Chair", "Bolt", "Sheet Metal",
-	"Tyre", "Tires & Engines", "Broken Fan", "Broken Radio", "Old Radio",
-	"Broken Microwave", "Washing Machine", "Old Car Engine",
-	"UFO Junk", "UFO Component", "Cultist Experiment", "Cultist Prototype",
-	"Obsidiron Shard", "Obsidiron Ingot",
+	"Chair",
+	"Log",
 }
 
--- Đã loại bỏ "Log" và "Chair" khỏi nhiên liệu lửa trại theo yêu cầu
+-- Nhiên liệu lửa trại (không gồm Log và Chair)
 local FUEL_EXACT = {
 	"Biofuel", "Coal", "Purple Fur Tuft", "Fuel Canister", "Oil Barrel",
 }
@@ -113,15 +92,6 @@ local CHEST_KEYS = {
 	"Jungle Chest", "Vine Chest", "Stone Chest", "Golden Stone Chest",
 	"Volcanic Chest", "Infernal Chest", "Frog Chest",
 	"Spooky Chest", "Vampire Chest", "Obsidiron Chest",
-}
-
-local CHEST_LOOT_HINTS = {
-	"Bandage", "Medkit", "Flashlight", "Axe", "Chainsaw",
-	"Spear", "Mace", "Morning Star", "Kunai", "Riot Shield",
-	"Revolver", "Rifle", "Shotgun", "Raygun", "Laser Sword",
-	"Rod", "Fuel Canister", "Oil Barrel", "Biofuel", "Coal",
-	"Sack", "Seed", "Blueprint", "Tablet", "Diamond",
-	"Gem", "Body", "Armour", "Armor", "Claws", "Dynamite",
 }
 
 local COIN_KEYS = { "Coin" }
@@ -198,6 +168,34 @@ local function partOf(m)
 		return nil
 	end)
 	return ok and res or nil
+end
+
+local function getChestBounds(chest)
+	if not chest or not chest.Parent then return nil, nil end
+	local ok, cf, sz = pcall(function()
+		if chest:IsA("Model") then
+			local mcf, msz = chest:GetBoundingBox()
+			return mcf, msz
+		elseif chest:IsA("BasePart") then
+			return chest.CFrame, chest.Size
+		end
+		return nil, nil
+	end)
+	if ok and cf and sz then
+		-- Giới hạn kích thước khít trong lòng rương, không tràn ra ngoài
+		local innerSize = Vector3.new(
+			math.max(math.min(sz.X, 6.5), 1.5),
+			math.max(math.min(sz.Y + 2.2, 6.5), 2.0),
+			math.max(math.min(sz.Z, 6.5), 1.5)
+		)
+		local innerCF = cf * CFrame.new(0, math.clamp(sz.Y * 0.25, 0.2, 1.2), 0)
+		return innerCF, innerSize
+	end
+	local p = partOf(chest)
+	if p then
+		return p.CFrame * CFrame.new(0, 1.0, 0), Vector3.new(4.5, 4.0, 4.5)
+	end
+	return nil, nil
 end
 
 local function moveItemToCFrame(obj, goalCF)
@@ -537,7 +535,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- AUTO OPEN CHEST -> HIGH SPEED LOOT / BAG CHECK / FIRE TP
+-- AUTO OPEN CHEST -> STRICTLY INSIDE CHEST BOUNDS LOOT
 --========================================================
 
 local chestLootStatusText = "Chờ bật tự động mở & nhặt rương..."
@@ -548,7 +546,6 @@ local lootedItems     = setmetatable({}, { __mode = "k" })
 local fireSentItems   = setmetatable({}, { __mode = "k" })
 local claimedAmmo     = setmetatable({}, { __mode = "k" })
 
-local CHEST_LOOT_RADIUS = 14
 local STEP_WAIT_SECONDS = 0.08
 
 local totalChestsOpened  = 0
@@ -722,23 +719,25 @@ local function isValidChestLoot(obj, targetChest)
 		return false
 	end
 
-	if obj:IsA("Tool") then return true end
-	if hasKey(name, CHEST_LOOT_HINTS) then return true end
-	return obj:IsA("Model") or obj:IsA("BasePart")
+	return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
 end
 
 local overlapParams = OverlapParams.new()
 overlapParams.FilterType = Enum.RaycastFilterType.Exclude
 
-local function scanLootAtChestPos(chestPos, targetChest)
+-- Chỉ lấy vật phẩm nằm trong phạm vi khối của rương, không quét ra ngoài
+local function scanLootInsideChest(targetChest)
+	local boxCF, boxSize = getChestBounds(targetChest)
+	if not boxCF or not boxSize then return {} end
+
 	local excludeList = { targetChest }
 	if Player.Character then table.insert(excludeList, Player.Character) end
 	overlapParams.FilterDescendantsInstances = excludeList
 
-	local nearbyParts = Workspace:GetPartBoundsInRadius(chestPos, CHEST_LOOT_RADIUS, overlapParams)
+	local insideParts = Workspace:GetPartBoundsInBox(boxCF, boxSize, overlapParams)
 	local out, seen = {}, {}
 
-	for _, part in ipairs(nearbyParts) do
+	for _, part in ipairs(insideParts) do
 		local candidate = part:FindFirstAncestorOfClass("Tool")
 			or part:FindFirstAncestorOfClass("Model")
 			or part
@@ -770,8 +769,8 @@ local function tryTakeIntoBag(item)
 	return nowInInv or (afterInv > beforeInv) or (afterBag > beforeBag) or (not item.Parent)
 end
 
-local function processChestLootHighSpeed(chest, chestPos)
-	local items = scanLootAtChestPos(chestPos, chest)
+local function processChestLootHighSpeed(chest)
+	local items = scanLootInsideChest(chest)
 	if #items == 0 then return 0, 0 end
 
 	local bagNameSet = getPlayerBagNameSet()
@@ -849,10 +848,7 @@ local function processNextChestStepFast()
 
 	pcall(OpenChestRE.FireServer, OpenChestRE, targetChest)
 
-	local currentChestPart = partOf(targetChest)
-	local scanPos = currentChestPart and currentChestPart.Position or targetPos
-
-	local grabbed, toFire = processChestLootHighSpeed(targetChest, scanPos)
+	local grabbed, toFire = processChestLootHighSpeed(targetChest)
 	local ammoGot = collectAllAmmoFast()
 
 	if grabbed > 0 or toFire > 0 or ammoGot > 0 then
@@ -1520,7 +1516,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- TP, PULL, CONTINUOUS FIRE FUEL & FULL-MAP SCRAPPER TP
+-- TP, PULL, CONTINUOUS FIRE FUEL & STRICT CHAIR/LOG SCRAPPER TP
 --========================================================
 
 local function tpTo(m)
@@ -1681,7 +1677,7 @@ task.spawn(function()
 	end
 end)
 
--- FULL-MAP CONTINUOUS AUTO SCRAPPER TP (NO PLAYER TP, NO CAP)
+-- FULL-MAP CONTINUOUS AUTO SCRAPPER TP (ONLY EXACT "Chair" AND "Log")
 local scrapStatusText = "Chờ bật auto TP Scrapper..."
 local scrapStatusLbl  = nil
 local isMovingScrap   = false
@@ -1694,12 +1690,8 @@ local function updateScrapStatus(txt)
 	end
 end
 
-local function isScrapCandidateName(name)
-	if type(name) ~= "string" then return false end
-	if hasKey(name, SCRAPPER_KEYS) or hasKey(name, { "Campfire", "MainFire", "Tree", "Sapling" }) then
-		return false
-	end
-	return matchesExact(name, SCRAP_EXACT) or hasKey(name, SCRAP_KEYS)
+local function isExactChairOrLog(name)
+	return type(name) == "string" and matchesExact(name, SCRAP_EXACT)
 end
 
 local function sendScrapToScrapper()
@@ -1709,7 +1701,7 @@ local function sendScrapToScrapper()
 	local okRun, moved = pcall(function()
 		local sp = getScrapperPart()
 		if not sp or not sp.Parent then
-			updateScrapStatus("❌ Không tìm thấy Scrapper / Grinder trên map")
+			updateScrapStatus("❌ Không tìm thấy Scrapper trên map")
 			return 0
 		end
 
@@ -1723,7 +1715,7 @@ local function sendScrapToScrapper()
 				local skip = (ch and o:IsDescendantOf(ch)) or Players:GetPlayerFromCharacter(o) ~= nil
 				if not skip then
 					local okN, oName = pcall(function() return o.Name end)
-					if okN and isScrapCandidateName(oName) then
+					if okN and isExactChairOrLog(oName) then
 						local p = partOf(o)
 						if p and (p.Position - sp.Position).Magnitude > 12 then
 							table.insert(candidates, o)
@@ -1735,7 +1727,7 @@ local function sendScrapToScrapper()
 		end
 
 		if #candidates == 0 then
-			updateScrapStatus(string.format("⚙️ Đang quét toàn map · Đã đưa: %d", totalScrapMoved))
+			updateScrapStatus(string.format("⚙️ Chỉ Chair & Log · Đã đưa: %d", totalScrapMoved))
 			return 0
 		end
 
@@ -1756,7 +1748,7 @@ local function sendScrapToScrapper()
 			if count % 15 == 0 then task.wait(0.03) end
 		end
 
-		updateScrapStatus(string.format("⚙️ Đã đưa +%d phế liệu (Tổng: %d)", count, totalScrapMoved))
+		updateScrapStatus(string.format("⚙️ Đã đưa +%d Chair/Log (Tổng: %d)", count, totalScrapMoved))
 		return count
 	end)
 
@@ -2494,9 +2486,9 @@ do
 		task.spawn(dumpFuelToFire)
 	end)
 
-	local sScrap = TabItems:AddSection("SCRAPPER / GRINDER (FULL MAP · KHÔNG TP NGƯỜI)")
-	sScrap:AddButton("⚙️ TP Scrapper / Grinder", tpScrapper)
-	sScrap:AddToggle("Auto TP phế liệu → Scrapper", CFG.AutoScrapper, function(v)
+	local sScrap = TabItems:AddSection("SCRAPPER (CHỈ CHAIR & LOG · KHÔNG TP NGƯỜI)")
+	sScrap:AddButton("⚙️ TP Scrapper", tpScrapper)
+	sScrap:AddToggle("Auto TP Chair & Log → Scrapper", CFG.AutoScrapper, function(v)
 		CFG.AutoScrapper = v
 		if v then
 			task.spawn(sendScrapToScrapper)
@@ -2505,7 +2497,7 @@ do
 		end
 	end)
 	scrapStatusLbl = sScrap:AddLabel(scrapStatusText)
-	sScrap:AddButton("🔩 Đưa phế liệu → Scrapper ngay", function()
+	sScrap:AddButton("🔩 Đưa Chair & Log → Scrapper ngay", function()
 		task.spawn(sendScrapToScrapper)
 	end)
 
@@ -2513,7 +2505,7 @@ do
 	sPull:AddButton("🍎 Kéo thức ăn", function()
 		task.spawn(function() pullAllExact(FOOD_ITEMS) end)
 	end)
-	sPull:AddButton("⚙️ Kéo phế liệu (Bolt, Sheet Metal...)", function()
+	sPull:AddButton("⚙️ Kéo Chair & Log", function()
 		task.spawn(function() pullAllExact(SCRAP_ITEMS) end)
 	end)
 
@@ -2555,5 +2547,5 @@ do
 end
 
 print("========================================")
-print(" SUNSET UI + 99 NIGHTS FULL LOADED ✓")
+print(" SUNSET UI + 99 NIGHTS STRICT LOADED ✓")
 print("========================================")
