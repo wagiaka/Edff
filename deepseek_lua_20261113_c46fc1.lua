@@ -2,7 +2,7 @@
 -- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & OPTIMIZED)
 -- TP Auto Chop (Exact Tree Name Filter + Anti-Lose Axe Fix)
 -- Independent Kill Aura + Conflict Warning | Auto Rescue Children
--- Cached Chest (multi-open, 1 item/chest, dedupe) + Ammo + Coins
+-- Cached Chest (multi-open, 1 item/chest, filter & beside-chest) + Ammo + Coins
 -- Auto Scrapper | Zero-Lag Mobile Ready
 --========================================================
 
@@ -447,7 +447,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- AUTO OPEN CHEST (MULTI-OPEN, 1 ITEM/CHEST, DEDUPE) + AMMO SCAN
+-- AUTO OPEN CHEST (MULTI-OPEN, 1 ITEM/CHEST, FILTERED) + AMMO SCAN
 --========================================================
 
 local chestLootStatusText = "Chờ bật tự động mở & nhặt rương..."
@@ -730,6 +730,29 @@ local function openSingleChest(chest)
 	return ok == true
 end
 
+-- ===== BỘ LỌC VẬT PHẨM RƯƠNG =====
+local Filter = {}
+
+-- Danh sách vật phẩm đáng giá (theo wiki 99 Nights) + các món script đang dùng
+Filter.wanted = {}
+local CHEST_WANTED_LIST = {
+	-- Rương thường / tốt / sắt / huyền thoại
+	"Bandage","Good Sack","Good Axe","Old Flashlight","Spear","Revolver","Fuel Canister",
+	"Leather Body","Rifle","Strong Flashlight","Defensive Blueprint Spikes",
+	"Iron Body","Strong Axe","Giant Sack","Medkit","Oil Barrel",
+	-- Rương vàng / giáo phái
+	"Morningstar","Dynamite","Impact Grenade","Bear Trap","Ammo Crate Recipe Tablet","Cultist Gem",
+	-- Rương hồng ngọc / assassin / người ngoài hành tinh / hang động
+	"Chainsaw","Kunai","Thorn Armor","Throwing Knives",
+	"Raygun","Laser Sword","Laser Cannon","Alien Armor","Laser Fence Blueprint",
+	-- Rương kim cương
+	"Diamond","Diamonds",
+}
+for _, n in ipairs(CHEST_WANTED_LIST) do Filter.wanted[n] = true end
+for _, n in ipairs(AXES) do Filter.wanted[n] = true end
+for _, n in ipairs(MELEE_WEAPONS) do Filter.wanted[n] = true end
+for _, n in ipairs(SACK_NAMES) do Filter.wanted[n] = true end
+
 -- Kiểm tra balo có vật phẩm trùng tên không (Inventory, Character, ItemBag)
 local function hasItemInBackpack(name)
 	local inv = Player:FindFirstChild("Inventory")
@@ -741,52 +764,75 @@ local function hasItemInBackpack(name)
 	return false
 end
 
--- Đưa vật phẩm về lửa trại (cơ chế kéo giống dumpFuelToFire)
-local function moveItemToCampfire(item)
-	local fp = getFirePart()
-	if not (fp and DragRE and StopDragRE and item and item.Parent) then return false end
-
-	local offset = Vector3.new(math.random(-20,20)/10, 7, math.random(-20,20)/10)
-	local goal = CFrame.new(fp.Position + offset)
-
-	pcall(DragRE.FireServer, DragRE, item)
+-- Đặt vị trí vật phẩm (Model / BasePart / Tool)
+local function setItemPosition(item, goalCF)
 	if item:IsA("Model") then
 		if not item.PrimaryPart then pcall(function() item.PrimaryPart = partOf(item) end) end
-		pcall(function() item:SetPrimaryPartCFrame(goal) end)
+		if item.PrimaryPart then
+			pcall(function() item:SetPrimaryPartCFrame(goalCF) end)
+		else
+			pcall(function() item:PivotTo(goalCF) end)
+		end
 	elseif item:IsA("BasePart") then
-		pcall(function() item.CFrame = goal end)
-	else
+		pcall(function() item.CFrame = goalCF end)
+	elseif item:IsA("Tool") then
 		local h = item:FindFirstChild("Handle")
-		if h then pcall(function() h.CFrame = goal end) end
+		if h then pcall(function() h.CFrame = goalCF end) end
 	end
+end
+
+local function moveItemTo(item, worldPos)
+	if not (DragRE and StopDragRE and item and item.Parent) then return false end
+	pcall(DragRE.FireServer, DragRE, item)
+	setItemPosition(item, CFrame.new(worldPos))
 	task.wait(0.05)
 	pcall(StopDragRE.FireServer, StopDragRE, item)
 	return true
 end
 
--- Chỉ xử lý 1 món ở vị trí rương:
---  - Trùng tên với đồ trong balo  -> không nhặt, đưa về lửa trại
---  - Không trùng                  -> nhặt
---  - Nhặt thất bại                -> đưa về lửa trại
+-- Đặt vật phẩm ngay cạnh rương (cách ~3.5 studs, ngẫu nhiên hướng)
+local function moveItemBesideChest(item, chest)
+	local cp = partOf(chest)
+	if not cp then return false end
+	local a = math.random() * math.pi * 2
+	local pos = cp.Position + Vector3.new(math.cos(a) * 3.5, 2, math.sin(a) * 3.5)
+	return moveItemTo(item, pos)
+end
+
+-- Xử lý tối đa 1 món được nhặt mỗi rương:
+--  - Không nằm trong danh sách  -> bỏ qua, không TP
+--  - Trùng với đồ trong balo    -> TP ra kế bên rương, đánh dấu để không xét lại
+--  - Hợp lệ & chưa có trong balo -> nhặt (dừng lại sau khi nhặt được 1 món)
+--  - Nhặt thất bại              -> để nguyên, cooldown rồi thử lại sau
 local function lootOneItemAtChest(chest, chestPos)
 	local items = scanLootAtChestPos(chestPos, chest, os.clock())
 	if #items == 0 then return "empty" end
 
-	local item = items[1]
-	if hasItemInBackpack(item.Name) then
-		moveItemToCampfire(item)
-		return "campfire"
-	end
+	local result = "skip"
+	for _, item in ipairs(items) do
+		local name = item.Name
 
-	if tryLootSingleItem(item) then
-		lootedItems[item] = true
-		totalItemsLooted += 1
-		return "picked"
-	end
+		if not Filter.wanted[name] then
+			lootedItems[item] = true
 
-	moveItemToCampfire(item)
-	return "campfire"
+		elseif hasItemInBackpack(name) then
+			lootedItems[item] = true
+			moveItemBesideChest(item, chest)
+			result = "dup"
+
+		else
+			if tryLootSingleItem(item) then
+				lootedItems[item] = true
+				totalItemsLooted += 1
+				return "picked"
+			else
+				failedLootAt[item] = os.clock()
+			end
+		end
+	end
+	return result
 end
+-- ===== END BỘ LỌC =====
 
 -- Lấy toàn bộ rương còn mở được, sắp theo khoảng cách (không giới hạn bán kính)
 local function getAvailableChests(now)
@@ -852,7 +898,7 @@ local function processChestCycle()
 				opened += 1
 				if res == "picked" then
 					picked += 1
-				elseif res == "campfire" then
+				elseif res == "dup" then
 					toFire += 1
 				end
 			else
@@ -863,7 +909,7 @@ local function processChestCycle()
 
 	local ammoGot = collectScannedAmmo()
 	updateChestLootStatus(
-		string.format("📦 Mở %d rương · Nhặt %d · Về lửa %d · Đạn +%d · Tổng: %d rương / %d đồ / %d đạn",
+		string.format("📦 Mở %d rương · Nhặt %d · Dời kế rương %d · Đạn +%d · Tổng: %d rương / %d đồ / %d đạn",
 			opened, picked, toFire, ammoGot,
 			totalChestsOpened, totalItemsLooted, totalAmmoCollected)
 	)
