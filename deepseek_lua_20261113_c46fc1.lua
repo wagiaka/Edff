@@ -19,7 +19,7 @@ local Player    = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 -- Cleanup old GUIs
-for _, name in ipairs({"OllieUI", "OllieMenu", "ollie_v9", "SunsetUI", "GodModeUI"}) do
+for _, name in ipairs({"OllieUI", "OllieMenu", "ollie_v9", "SunsetUI"}) do
 	pcall(function()
 		local g = PlayerGui:FindFirstChild(name)
 		if g then g:Destroy() end
@@ -95,6 +95,7 @@ local CFG = {
 	Jump=false,             JumpPower=90,
 	Fly=false,              FlySpeed=60,
 	Noclip=false,
+	GodMode=false,
 	KillAura=false,         KillRadius=150,
 	AutoChop=false,         ChopRadius=130,
 	AutoDrop=false,
@@ -1571,6 +1572,80 @@ Player.CharacterAdded:Connect(function()
 end)
 
 --========================================================
+-- GOD MODE SYSTEM
+--========================================================
+
+local NPCAttackRE = Remotes and Remotes:FindFirstChild("ClientTriggerNPCAttack")
+local godConn = nil
+local godHPText = "HP: --"
+local godHPLbl  = nil
+
+local function updateGodHP(txt)
+	godHPText = txt
+	if godHPLbl and godHPLbl.Parent then
+		godHPLbl.Text = txt
+	end
+end
+
+local function getNearestNPC()
+	local r = root()
+	local rPos = r and r.Position
+	local best, bestD = nil, math.huge
+	local function tryNPC(o)
+		if not o:IsA("Model") then return end
+		if Players:GetPlayerFromCharacter(o) then return end
+		if o == Player.Character then return end
+		local h = o:FindFirstChildWhichIsA("Humanoid", true)
+		if not (h and h.Health > 0) then return end
+		local p = partOf(o)
+		if not p then return end
+		local d = rPos and (p.Position - rPos).Magnitude or 0
+		if d < bestD then best = o; bestD = d end
+	end
+	for _, o in ipairs(Workspace:GetChildren()) do tryNPC(o) end
+	for _, fn in ipairs(SCAN_FOLDERS) do
+		local folder = Workspace:FindFirstChild(fn)
+		if folder then
+			for _, o in ipairs(folder:GetChildren()) do tryNPC(o) end
+		end
+	end
+	return best
+end
+
+local function startGodMode()
+	if godConn then godConn:Disconnect(); godConn = nil end
+	godConn = RunService.Heartbeat:Connect(function()
+		if not CFG.GodMode then
+			godConn:Disconnect(); godConn = nil
+			updateGodHP("HP: --")
+			return
+		end
+		local h = hum()
+		if h then
+			if h.Health < h.MaxHealth then h.Health = h.MaxHealth end
+			h.AutoRotate = true
+			updateGodHP(string.format("🛡️ God Mode BẬT · HP: %d / %d", math.floor(h.Health), math.floor(h.MaxHealth)))
+		end
+		if NPCAttackRE and (tick() % 0.5) < 0.016 then
+			local decoy = getNearestNPC()
+			if decoy then pcall(NPCAttackRE.FireServer, NPCAttackRE, decoy) end
+		end
+	end)
+end
+
+local function stopGodMode()
+	if godConn then godConn:Disconnect(); godConn = nil end
+	local h = hum()
+	if h and h.Health <= 0 then h.Health = h.MaxHealth end
+	updateGodHP("HP: --")
+end
+
+Player.CharacterAdded:Connect(function()
+	task.wait(0.5)
+	if CFG.GodMode then startGodMode() end
+end)
+
+--========================================================
 -- FULLBRIGHT & FIX LAG PRO
 --========================================================
 
@@ -2510,226 +2585,6 @@ holdBtn(0,  "▲", function(v) padUp   = v end)
 holdBtn(68, "▼", function(v) padDown = v end)
 
 --========================================================
--- GOD MODE SYSTEM
---========================================================
-
-local NPCAttackRE = Remotes and Remotes:FindFirstChild("ClientTriggerNPCAttack")
-CFG.GodMode = false
-local godConn = nil
-
-local function getNearestNPC()
-	local r = root()
-	local rPos = r and r.Position
-	local best, bestD = nil, math.huge
-	local function tryNPC(o)
-		if not o:IsA("Model") then return end
-		if Players:GetPlayerFromCharacter(o) then return end
-		if o == Player.Character then return end
-		local h = o:FindFirstChildWhichIsA("Humanoid", true)
-		if not (h and h.Health > 0) then return end
-		local p = partOf(o)
-		if not p then return end
-		local d = rPos and (p.Position - rPos).Magnitude or 0
-		if d < bestD then best = o; bestD = d end
-	end
-	for _, o in ipairs(Workspace:GetChildren()) do tryNPC(o) end
-	for _, fn in ipairs(SCAN_FOLDERS) do
-		local folder = Workspace:FindFirstChild(fn)
-		if folder then
-			for _, o in ipairs(folder:GetChildren()) do tryNPC(o) end
-		end
-	end
-	return best
-end
-
-local function startGodMode()
-	if godConn then godConn:Disconnect(); godConn = nil end
-	godConn = RunService.Heartbeat:Connect(function()
-		if not CFG.GodMode then
-			godConn:Disconnect(); godConn = nil
-			return
-		end
-		local h = hum()
-		if h then
-			if h.Health < h.MaxHealth then h.Health = h.MaxHealth end
-			h.AutoRotate = true
-		end
-		if NPCAttackRE and (tick() % 0.5) < 0.016 then
-			local decoy = getNearestNPC()
-			if decoy then pcall(NPCAttackRE.FireServer, NPCAttackRE, decoy) end
-		end
-	end)
-end
-
-local function stopGodMode()
-	if godConn then godConn:Disconnect(); godConn = nil end
-	local h = hum()
-	if h and h.Health <= 0 then h.Health = h.MaxHealth end
-end
-
-Player.CharacterAdded:Connect(function()
-	task.wait(0.5)
-	if CFG.GodMode then startGodMode() end
-end)
-
---========================================================
--- GOD MODE MINI MENU (NÚT NỔI GÓC PHẢI TRÊN)
---========================================================
-
-local godGui = Instance.new("ScreenGui")
-godGui.Name = "GodModeUI"
-godGui.IgnoreGuiInset = true
-godGui.ResetOnSpawn = false
-godGui.DisplayOrder = 101
-pcall(function() godGui.Parent = CoreGui end)
-if godGui.Parent ~= CoreGui then godGui.Parent = PlayerGui end
-
--- Container chính
-local godPanel = Instance.new("Frame")
-godPanel.Size = UDim2.new(0, 160, 0, 112)
-godPanel.Position = UDim2.new(1, -170, 0, 12)
-godPanel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-godPanel.BackgroundTransparency = 0.15
-godPanel.BorderSizePixel = 0
-godPanel.Parent = godGui
-Instance.new("UICorner", godPanel).CornerRadius = UDim.new(0, 10)
-
-local godStroke = Instance.new("UIStroke", godPanel)
-godStroke.Color = Color3.fromRGB(255, 60, 60)
-godStroke.Thickness = 1.5
-
--- Tiêu đề
-local godTitle = Instance.new("TextLabel", godPanel)
-godTitle.Size = UDim2.new(1, 0, 0, 28)
-godTitle.Position = UDim2.new(0, 0, 0, 0)
-godTitle.BackgroundTransparency = 1
-godTitle.Text = "🛡️  GOD MODE"
-godTitle.TextColor3 = Color3.fromRGB(255, 80, 80)
-godTitle.Font = Enum.Font.GothamBold
-godTitle.TextSize = 13
-
--- Đường kẻ ngang
-local godDiv = Instance.new("Frame", godPanel)
-godDiv.Size = UDim2.new(1, -20, 0, 1)
-godDiv.Position = UDim2.new(0, 10, 0, 28)
-godDiv.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
-godDiv.BackgroundTransparency = 0.5
-godDiv.BorderSizePixel = 0
-
--- Trạng thái
-local godStatus = Instance.new("TextLabel", godPanel)
-godStatus.Size = UDim2.new(1, -16, 0, 20)
-godStatus.Position = UDim2.new(0, 8, 0, 34)
-godStatus.BackgroundTransparency = 1
-godStatus.Text = "Trạng thái: TẮT"
-godStatus.TextColor3 = Color3.fromRGB(180, 180, 180)
-godStatus.Font = Enum.Font.Gotham
-godStatus.TextSize = 11
-godStatus.TextXAlignment = Enum.TextXAlignment.Left
-
--- HP Label
-local godHPLabel = Instance.new("TextLabel", godPanel)
-godHPLabel.Size = UDim2.new(1, -16, 0, 16)
-godHPLabel.Position = UDim2.new(0, 8, 0, 54)
-godHPLabel.BackgroundTransparency = 1
-godHPLabel.Text = "HP: --"
-godHPLabel.TextColor3 = Color3.fromRGB(100, 220, 100)
-godHPLabel.Font = Enum.Font.Gotham
-godHPLabel.TextSize = 11
-godHPLabel.TextXAlignment = Enum.TextXAlignment.Left
-
--- Toggle button
-local godBtn = Instance.new("TextButton", godPanel)
-godBtn.Size = UDim2.new(1, -16, 0, 28)
-godBtn.Position = UDim2.new(0, 8, 0, 76)
-godBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-godBtn.Text = "BẬT GOD MODE"
-godBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
-godBtn.Font = Enum.Font.GothamBold
-godBtn.TextSize = 12
-godBtn.BorderSizePixel = 0
-Instance.new("UICorner", godBtn).CornerRadius = UDim.new(0, 6)
-local godBtnStroke = Instance.new("UIStroke", godBtn)
-godBtnStroke.Color = Color3.fromRGB(255, 60, 60)
-godBtnStroke.Thickness = 1
-
--- Kéo panel
-local draggingGod, dragStartGod, startPosGod = false, nil, nil
-godPanel.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.Touch
-	or input.UserInputType == Enum.UserInputType.MouseButton1 then
-		draggingGod = true
-		dragStartGod = input.Position
-		startPosGod = godPanel.Position
-	end
-end)
-godPanel.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.Touch
-	or input.UserInputType == Enum.UserInputType.MouseButton1 then
-		draggingGod = false
-	end
-end)
-UIS.InputChanged:Connect(function(input)
-	if draggingGod and (
-		input.UserInputType == Enum.UserInputType.Touch
-		or input.UserInputType == Enum.UserInputType.MouseMovement
-	) then
-		local delta = input.Position - dragStartGod
-		godPanel.Position = UDim2.new(
-			startPosGod.X.Scale, startPosGod.X.Offset + delta.X,
-			startPosGod.Y.Scale, startPosGod.Y.Offset + delta.Y
-		)
-	end
-end)
-
--- Cập nhật UI state
-local function refreshGodUI()
-	if CFG.GodMode then
-		godStatus.Text = "Trạng thái: BẬT ✅"
-		godStatus.TextColor3 = Color3.fromRGB(100, 255, 100)
-		godBtn.Text = "TẮT GOD MODE"
-		godBtn.TextColor3 = Color3.fromRGB(100, 255, 100)
-		godBtnStroke.Color = Color3.fromRGB(80, 220, 80)
-		godStroke.Color = Color3.fromRGB(80, 220, 80)
-		godTitle.TextColor3 = Color3.fromRGB(100, 255, 100)
-		godBtn.BackgroundColor3 = Color3.fromRGB(20, 50, 20)
-	else
-		godStatus.Text = "Trạng thái: TẮT"
-		godStatus.TextColor3 = Color3.fromRGB(180, 180, 180)
-		godBtn.Text = "BẬT GOD MODE"
-		godBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
-		godBtnStroke.Color = Color3.fromRGB(255, 60, 60)
-		godStroke.Color = Color3.fromRGB(255, 60, 60)
-		godTitle.TextColor3 = Color3.fromRGB(255, 80, 80)
-		godBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-		godHPLabel.Text = "HP: --"
-	end
-end
-
--- Cập nhật HP realtime
-RunService.Heartbeat:Connect(function()
-	if CFG.GodMode then
-		local h = hum()
-		if h then
-			godHPLabel.Text = string.format("HP: %d / %d", math.floor(h.Health), math.floor(h.MaxHealth))
-		end
-	end
-end)
-
--- Nút bấm
-godBtn.MouseButton1Click:Connect(function()
-	CFG.GodMode = not CFG.GodMode
-	if CFG.GodMode then
-		startGodMode()
-	else
-		stopGodMode()
-	end
-	refreshGodUI()
-end)
-
-refreshGodUI()
-
---========================================================
 -- BUILD MENU & CONFLICT WARNING
 --========================================================
 
@@ -2806,6 +2661,16 @@ do
 	coinStatusLbl = sChest:AddLabel(coinStatusText)
 
 	local sSurv = TabMain:AddSection("SINH TỒN & TRỒNG CÂY")
+	sSurv:AddToggle("God Mode", CFG.GodMode, function(v)
+		CFG.GodMode = v
+		if v then
+			startGodMode()
+		else
+			stopGodMode()
+		end
+	end)
+	godHPLbl = sSurv:AddLabel(godHPText)
+
 	sSurv:AddToggle("Auto Eat Carrot", CFG.AutoEat, function(v)
 		CFG.AutoEat = v
 		if not v then updateEatStatus("Tắt") end
