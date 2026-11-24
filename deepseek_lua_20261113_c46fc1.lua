@@ -1,8 +1,8 @@
 --========================================================
--- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & UPDATED)
--- Scrapper: Direct Item TP, Full Map, Unlimited Count
--- Campfire Fuel: No Log/Chair, Continuous, Unlimited Count
--- Chest Loot: High Speed, Bag Check -> Campfire TP for Dupes/Non-Bag
+-- SUNSET UI + OLLIE 99 NIGHTS (FULL COMPLETE EDITION)
+-- Updated Scrap/Grinder/Chest Filters + Direct Item TP
+-- Continuous Campfire Fuel (No Log/Chair) + High-Speed Chest
+-- TP Auto Chop + Independent Kill Aura + Auto Rescue Child
 --========================================================
 
 local Players      = game:GetService("Players")
@@ -30,7 +30,7 @@ for _, name in ipairs({"OllieUI", "OllieMenu", "ollie_v9", "SunsetUI"}) do
 end
 
 --========================================================
--- REMOTES & GAME DATA
+-- REMOTES & GAME DATA (99 NIGHTS FILTERS)
 --========================================================
 
 local Remotes       = RS:WaitForChild("RemoteEvents", 10)
@@ -50,56 +50,107 @@ local BagStoreRF    = Remotes and Remotes:FindFirstChild("RequestBagStoreItem")
 local BagDropRE     = Remotes and Remotes:FindFirstChild("RequestBagDropItem")
 
 local AXES = {
-	"Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
+	"Old Axe", "Good Axe", "Ice Axe", "Strong Axe", "Chainsaw", "Admin Axe",
 }
+
 local MELEE_WEAPONS = {
-	"Spear","Honey Spear","Morningstar","Katana","Laser Sword","Ice Sword",
-	"Trident","Poison Claws","Poison Spear","Infernal Sword",
-	"Cultist King Mace","Brutal Battleaxe","Obsidiron Hammer",
-	"Scythe","Vampire Scythe","Happy's Scythe",
+	"Spear", "Diamond Spear", "Honey Spear", "Morningstar", "Morning Star",
+	"Kunai", "Katana", "Laser Sword", "Ice Sword", "Trident",
+	"Poison Claws", "Poison Spear", "Infernal Sword",
+	"Cultist King Mace", "Brutal Battleaxe", "Obsidiron Hammer",
+	"Scythe", "Vampire Scythe", "Happy's Scythe",
 }
+
 local SACK_NAMES = {
-	"Admin Sack","Strong Sack","Good Sack","Old Sack","Sack","Bag",
+	"Giant Sack", "Admin Sack", "Strong Sack", "Good Sack", "Old Sack", "Sack", "Bag",
 }
-local FOOD_ITEMS  = { "Berry","Carrot","Apple","Corn","Pumpkin","Chili" }
-local SCRAP_ITEMS = {
-	"Log","Chair","Bolt","Sheet Metal","Broken Fan","Broken Radio",
-	"Broken Microwave","Washing Machine","Tires & Engines",
+
+local FOOD_ITEMS = { "Berry", "Carrot", "Apple", "Corn", "Pumpkin", "Chili" }
+
+local SCRAPPER_KEYS = {
+	"Scrapper", "Grinder", "Recycler", "Anvil",
 }
+
+local SCRAP_EXACT = {
+	"Bolt", "Sheet Metal", "Tyre", "Tires & Engines",
+	"Metal Chair", "Chair", "Log",
+	"Broken Fan", "Broken Radio", "Old Radio",
+	"Broken Microwave", "Washing Machine", "Old Car Engine",
+	"UFO Junk", "UFO Component", "UFO Scrap",
+	"Cultist Experiment", "Cultist Prototype",
+	"Obsidiron Shard", "Obsidiron Ingot", "Obsidiron",
+}
+
 local SCRAP_KEYS = {
-	"Log", "Chair", "Sheet Metal", "Bolt", "Scrap", "Iron", "Metal",
-	"Broken Fan", "Broken Radio", "Broken Microwave", "Washing Machine", "Tires & Engines"
+	"Bolt", "Sheet Metal", "Tyre", "Tire", "Engine",
+	"Metal Chair", "Chair", "Log",
+	"Broken Fan", "Broken Radio", "Radio",
+	"Broken Microwave", "Microwave",
+	"Washing Machine", "Scrap", "Iron", "Metal",
+	"UFO Junk", "UFO Component", "UFO",
+	"Cultist Experiment", "Cultist Prototype",
+	"Obsidiron",
 }
--- Đã bỏ "Log" và "Chair" (ghế gỗ) theo yêu cầu
+
+local SCRAP_ITEMS = {
+	"Log", "Chair", "Metal Chair", "Bolt", "Sheet Metal",
+	"Tyre", "Tires & Engines", "Broken Fan", "Broken Radio", "Old Radio",
+	"Broken Microwave", "Washing Machine", "Old Car Engine",
+	"UFO Junk", "UFO Component", "Cultist Experiment", "Cultist Prototype",
+	"Obsidiron Shard", "Obsidiron Ingot",
+}
+
+-- Đã loại bỏ "Log" và "Chair" khỏi nhiên liệu lửa trại theo yêu cầu
 local FUEL_EXACT = {
-	"Biofuel","Coal",
-	"Purple Fur Tuft","Fuel Canister","Oil Barrel",
+	"Biofuel", "Coal", "Purple Fur Tuft", "Fuel Canister", "Oil Barrel",
 }
-local CHEST_KEYS = { "Chest", "Crate", "Supply", "Loot" }
-local COIN_KEYS  = { "Coin" }
-local AMMO_KEYS  = { "Ammo", "Bullet", "Shell", "Arrow", "Dart", "Rocket", "Cartridge" }
+
+local CHEST_KEYS = {
+	"Chest", "Crate", "Supply", "Loot",
+	"Common Chest", "Good Chest", "Iron Chest", "Legendary Chest",
+	"Gold Chest", "Ruby Chest", "Diamond Chest",
+	"Alien Chest", "Cold Chest", "Ice Chest",
+	"Jungle Chest", "Vine Chest", "Stone Chest", "Golden Stone Chest",
+	"Volcanic Chest", "Infernal Chest", "Frog Chest",
+	"Spooky Chest", "Vampire Chest", "Obsidiron Chest",
+}
+
+local CHEST_LOOT_HINTS = {
+	"Bandage", "Medkit", "Flashlight", "Axe", "Chainsaw",
+	"Spear", "Mace", "Morning Star", "Kunai", "Riot Shield",
+	"Revolver", "Rifle", "Shotgun", "Raygun", "Laser Sword",
+	"Rod", "Fuel Canister", "Oil Barrel", "Biofuel", "Coal",
+	"Sack", "Seed", "Blueprint", "Tablet", "Diamond",
+	"Gem", "Body", "Armour", "Armor", "Claws", "Dynamite",
+}
+
+local COIN_KEYS = { "Coin" }
+local AMMO_KEYS = { "Ammo", "Bullet", "Shell", "Arrow", "Dart", "Rocket", "Cartridge" }
+
 local IGNORE_LOOT_KEYS = {
-	"Tree","Pine","Oak","Birch","Fir","Bush","Foliage","Wall","Floor","Ground",
-	"Terrain","Campfire","MainFire","Spawn","Part","Baseplate","Hitbox"
+	"Tree", "Pine", "Oak", "Birch", "Fir", "Bush", "Foliage",
+	"Wall", "Floor", "Ground", "Terrain", "Campfire", "MainFire",
+	"Scrapper", "Grinder", "Recycler", "Anvil",
+	"Spawn", "Part", "Baseplate", "Hitbox",
 }
 
 local CFG = {
-	Speed=false,            WalkSpeed=40,
-	Jump=false,             JumpPower=90,
-	Fly=false,              FlySpeed=60,
-	Noclip=false,
-	KillAura=false,         KillRadius=150,
-	AutoChop=false,         ChopRadius=130,
-	AutoDrop=false,
-	AutoScrapper=false,
-	AutoEat=false,
-	AutoChestAndLoot=false,
-	AutoCollectCoins=false,
-	AutoRescueChild=false,
-	ESPChild=false,
-	Fullbright=false,
-	FixLag=false,
-	Delay=0.35,
+	Speed = false,            WalkSpeed = 40,
+	Jump = false,             JumpPower = 90,
+	Fly = false,              FlySpeed = 60,
+	Noclip = false,
+	KillAura = false,         KillRadius = 150,
+	AutoChop = false,         ChopRadius = 130,
+	AutoDrop = false,
+	AutoScrapper = false,
+	AutoEat = false,
+	AutoChestAndLoot = false,
+	AutoCollectCoins = false,
+	AutoRescueChild = false,
+	ESPChild = false,
+	Fullbright = false,
+	FixLag = false,
+	Delay = 0.35,
 }
 
 local MAX_KILL_PER_CYCLE = 6
@@ -266,14 +317,11 @@ local function getScrapperPart()
 			local list = (sr == Workspace) and sr:GetChildren() or sr:GetDescendants()
 			for _, o in ipairs(list) do
 				local okName, n = pcall(function() return o.Name end)
-				if okName and type(n) == "string" then
-					local lower = string.lower(n)
-					if string.find(lower, "scrapper", 1, true) or string.find(lower, "grinder", 1, true) or string.find(lower, "recycler", 1, true) then
-						local p = partOf(o)
-						if p then
-							cachedScrapperPart = p
-							return p
-						end
+				if okName and type(n) == "string" and hasKey(n, SCRAPPER_KEYS) then
+					local p = partOf(o)
+					if p then
+						cachedScrapperPart = p
+						return p
 					end
 				end
 			end
@@ -548,7 +596,6 @@ local function initChestCache()
 	end)
 end
 
--- Quét toàn bộ balo / túi đồ / hành trang hiện tại của người chơi
 local function getPlayerBagNameSet()
 	local names = {}
 	local containers = {
@@ -675,7 +722,9 @@ local function isValidChestLoot(obj, targetChest)
 		return false
 	end
 
-	return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
+	if obj:IsA("Tool") then return true end
+	if hasKey(name, CHEST_LOOT_HINTS) then return true end
+	return obj:IsA("Model") or obj:IsA("BasePart")
 end
 
 local overlapParams = OverlapParams.new()
@@ -732,13 +781,11 @@ local function processChestLootHighSpeed(chest, chestPos)
 		if not CFG.AutoChestAndLoot then break end
 		if not item or not item.Parent or fireSentItems[item] then continue end
 
-		-- 1. Kiểm tra xem vật phẩm đã có trong balo người chơi chưa
 		if isItemAlreadyInPlayerBag(item, bagNameSet) then
 			if tpItemToCampfire(item, idx) then
 				toFire += 1
 			end
 		else
-			-- 2. Chưa có trong balo -> thử đưa vào balo; nếu không đưa vào balo được thì TP về lửa trại
 			local isBagEligible = item:IsA("Tool") or item:IsA("Model")
 			local took = isBagEligible and tryTakeIntoBag(item) or false
 
@@ -1007,7 +1054,7 @@ local function swingBatch(tool, targets)
 	unequipToolSafe(tool)
 end
 
-local SCAN_FOLDERS = { "Characters","Enemies","Mobs","NPCs" }
+local SCAN_FOLDERS = { "Characters", "Enemies", "Mobs", "NPCs" }
 local function getAnimals(r)
 	local out, ch, seen = {}, Player.Character, {}
 	local maxDSq = CFG.KillRadius * CFG.KillRadius
@@ -1042,7 +1089,7 @@ local function getAnimals(r)
 end
 
 local skipTree = {}
-local TREE_KEYS = { "Tree","Pine","Oak","Birch","Fir" }
+local TREE_KEYS = { "Tree", "Pine", "Oak", "Birch", "Fir" }
 
 local function isValidTreeModel(o)
 	if not o or not o.Parent or not o:IsA("Model") then return false end
@@ -1649,10 +1696,10 @@ end
 
 local function isScrapCandidateName(name)
 	if type(name) ~= "string" then return false end
-	if hasKey(name, { "Scrapper", "Grinder", "Recycler", "Campfire", "MainFire", "Tree", "Sapling" }) then
+	if hasKey(name, SCRAPPER_KEYS) or hasKey(name, { "Campfire", "MainFire", "Tree", "Sapling" }) then
 		return false
 	end
-	return matchesExact(name, SCRAP_ITEMS) or hasKey(name, SCRAP_KEYS)
+	return matchesExact(name, SCRAP_EXACT) or hasKey(name, SCRAP_KEYS)
 end
 
 local function sendScrapToScrapper()
@@ -1662,7 +1709,7 @@ local function sendScrapToScrapper()
 	local okRun, moved = pcall(function()
 		local sp = getScrapperPart()
 		if not sp or not sp.Parent then
-			updateScrapStatus("❌ Không tìm thấy Scrapper trên map")
+			updateScrapStatus("❌ Không tìm thấy Scrapper / Grinder trên map")
 			return 0
 		end
 
@@ -1709,7 +1756,7 @@ local function sendScrapToScrapper()
 			if count % 15 == 0 then task.wait(0.03) end
 		end
 
-		updateScrapStatus(string.format("⚙️ Đã đưa +%d nguyên liệu (Tổng: %d)", count, totalScrapMoved))
+		updateScrapStatus(string.format("⚙️ Đã đưa +%d phế liệu (Tổng: %d)", count, totalScrapMoved))
 		return count
 	end)
 
@@ -2447,9 +2494,9 @@ do
 		task.spawn(dumpFuelToFire)
 	end)
 
-	local sScrap = TabItems:AddSection("SCRAPPER (FULL MAP · KHÔNG TP NGƯỜI)")
-	sScrap:AddButton("⚙️ TP Scrapper", tpScrapper)
-	sScrap:AddToggle("Auto TP nguyên liệu → Scrapper", CFG.AutoScrapper, function(v)
+	local sScrap = TabItems:AddSection("SCRAPPER / GRINDER (FULL MAP · KHÔNG TP NGƯỜI)")
+	sScrap:AddButton("⚙️ TP Scrapper / Grinder", tpScrapper)
+	sScrap:AddToggle("Auto TP phế liệu → Scrapper", CFG.AutoScrapper, function(v)
 		CFG.AutoScrapper = v
 		if v then
 			task.spawn(sendScrapToScrapper)
@@ -2458,7 +2505,7 @@ do
 		end
 	end)
 	scrapStatusLbl = sScrap:AddLabel(scrapStatusText)
-	sScrap:AddButton("🔩 Đưa nguyên liệu → Scrapper ngay", function()
+	sScrap:AddButton("🔩 Đưa phế liệu → Scrapper ngay", function()
 		task.spawn(sendScrapToScrapper)
 	end)
 
@@ -2466,7 +2513,7 @@ do
 	sPull:AddButton("🍎 Kéo thức ăn", function()
 		task.spawn(function() pullAllExact(FOOD_ITEMS) end)
 	end)
-	sPull:AddButton("⚙️ Kéo nguyên liệu (Log, Chair...)", function()
+	sPull:AddButton("⚙️ Kéo phế liệu (Bolt, Sheet Metal...)", function()
 		task.spawn(function() pullAllExact(SCRAP_ITEMS) end)
 	end)
 
@@ -2508,5 +2555,5 @@ do
 end
 
 print("========================================")
-print(" SUNSET UI + 99 NIGHTS COMPLETE LOADED ✓")
+print(" SUNSET UI + 99 NIGHTS FULL LOADED ✓")
 print("========================================")
