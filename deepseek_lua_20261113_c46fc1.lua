@@ -1,8 +1,8 @@
 --========================================================
--- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & FIXED)
--- TP Auto Chop + Independent Kill Aura | Auto Rescue Children
--- Fixed Campfire Auto Fuel + Auto TP Scrapper (Iron/Log/Chair)
--- Cached Chest + Ammo + Coins | Zero-Lag Mobile Ready
+-- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & UPDATED)
+-- Scrapper: Direct Item TP, Full Map, Unlimited Count
+-- Campfire Fuel: No Log/Chair, Continuous, Unlimited Count
+-- Chest Loot: High Speed, Bag Check -> Campfire TP for Dupes/Non-Bag
 --========================================================
 
 local Players      = game:GetService("Players")
@@ -70,8 +70,9 @@ local SCRAP_KEYS = {
 	"Log", "Chair", "Sheet Metal", "Bolt", "Scrap", "Iron", "Metal",
 	"Broken Fan", "Broken Radio", "Broken Microwave", "Washing Machine", "Tires & Engines"
 }
+-- Đã bỏ "Log" và "Chair" (ghế gỗ) theo yêu cầu
 local FUEL_EXACT = {
-	"Log","Chair","Biofuel","Coal",
+	"Biofuel","Coal",
 	"Purple Fur Tuft","Fuel Canister","Oil Barrel",
 }
 local CHEST_KEYS = { "Chest", "Crate", "Supply", "Loot" }
@@ -146,6 +147,24 @@ local function partOf(m)
 		return nil
 	end)
 	return ok and res or nil
+end
+
+local function moveItemToCFrame(obj, goalCF)
+	if not obj or not obj.Parent then return false end
+	local ok = pcall(function()
+		if DragRE then
+			pcall(DragRE.FireServer, DragRE, obj)
+		end
+		if obj:IsA("Model") then
+			obj:PivotTo(goalCF)
+		elseif obj:IsA("BasePart") then
+			obj.CFrame = goalCF
+		end
+	end)
+	if StopDragRE then
+		pcall(StopDragRE.FireServer, StopDragRE, obj)
+	end
+	return ok == true
 end
 
 local function findFromList(list, inv, char)
@@ -470,28 +489,23 @@ task.spawn(function()
 end)
 
 --========================================================
--- AUTO OPEN CHEST -> LOOT AT CHEST POS + AUTO SCAN AMMO (2s)
+-- AUTO OPEN CHEST -> HIGH SPEED LOOT / BAG CHECK / FIRE TP
 --========================================================
 
 local chestLootStatusText = "Chờ bật tự động mở & nhặt rương..."
 local chestLootStatusLbl  = nil
 
 local cachedChests    = {}
-local openedChestDone = setmetatable({}, { __mode = "k" })
-local failedChestAt   = {}
 local lootedItems     = setmetatable({}, { __mode = "k" })
-local failedLootAt    = {}
+local fireSentItems   = setmetatable({}, { __mode = "k" })
 local claimedAmmo     = setmetatable({}, { __mode = "k" })
-local failedAmmoAt    = {}
 
-local CHEST_FAIL_COOLDOWN = 45
-local LOOT_FAIL_COOLDOWN  = 35
-local AMMO_FAIL_COOLDOWN  = 15
-local CHEST_LOOT_RADIUS   = 12
-local STEP_WAIT_SECONDS   = 2
+local CHEST_LOOT_RADIUS = 14
+local STEP_WAIT_SECONDS = 0.08
 
 local totalChestsOpened  = 0
 local totalItemsLooted   = 0
+local totalSentToFire    = 0
 local totalAmmoCollected = 0
 
 local function updateChestLootStatus(txt)
@@ -520,7 +534,6 @@ local function initChestCache()
 			if isChestObject(o) then
 				cachedChests[o] = true
 			end
-			if i % 800 == 0 then task.wait() end
 		end
 	end)
 
@@ -532,13 +545,73 @@ local function initChestCache()
 
 	targetRoot.DescendantRemoving:Connect(function(o)
 		cachedChests[o] = nil
-		failedChestAt[o] = nil
 	end)
 end
 
-local cachedAmmoList = {}
-local lastAmmoScanAt = 0
-local AMMO_SCAN_INTERVAL = 2.5
+-- Quét toàn bộ balo / túi đồ / hành trang hiện tại của người chơi
+local function getPlayerBagNameSet()
+	local names = {}
+	local containers = {
+		Player:FindFirstChild("Inventory"),
+		Player:FindFirstChild("ItemBag"),
+		Player:FindFirstChild("Backpack"),
+		Player:FindFirstChild("Bag"),
+		Player:FindFirstChild("Hotbar"),
+		Player.Character,
+	}
+
+	for _, cont in ipairs(containers) do
+		if cont then
+			for _, obj in ipairs(cont:GetChildren()) do
+				local okN, n = pcall(function() return obj.Name end)
+				if okN and type(n) == "string" then
+					names[string.lower(n)] = true
+				end
+			end
+		end
+	end
+	return names
+end
+
+local function isItemAlreadyInPlayerBag(item, bagNameSet)
+	if not item then return false end
+	local containers = {
+		Player:FindFirstChild("Inventory"),
+		Player:FindFirstChild("ItemBag"),
+		Player:FindFirstChild("Backpack"),
+		Player:FindFirstChild("Bag"),
+		Player.Character,
+	}
+	for _, cont in ipairs(containers) do
+		if cont and item:IsDescendantOf(cont) then
+			return true
+		end
+	end
+	local okN, n = pcall(function() return item.Name end)
+	if okN and type(n) == "string" then
+		return bagNameSet[string.lower(n)] == true
+	end
+	return false
+end
+
+local function tpItemToCampfire(item, idx)
+	if not item or not item.Parent then return false end
+	if fireSentItems[item] then return true end
+	local fp = getFirePart()
+	if not fp or not fp.Parent then return false end
+
+	local spread = Vector3.new(
+		math.random(-25, 25) / 10,
+		5.5 + ((idx or 1) % 6) * 0.45,
+		math.random(-25, 25) / 10
+	)
+	local moved = moveItemToCFrame(item, CFrame.new(fp.Position + spread))
+	if moved then
+		fireSentItems[item] = true
+		totalSentToFire += 1
+	end
+	return moved
+end
 
 local function isAmmoObject(obj)
 	if not obj then return false end
@@ -550,13 +623,8 @@ local function isAmmoObject(obj)
 	return hasKey(name, AMMO_KEYS)
 end
 
-local function refreshAmmoCache(force)
-	local now = os.clock()
-	if not force and (now - lastAmmoScanAt) < AMMO_SCAN_INTERVAL then
-		return cachedAmmoList
-	end
-	lastAmmoScanAt = now
-
+local function collectAllAmmoFast()
+	if not ConsumeRF then return 0 end
 	local found, seen = {}, {}
 	local function tryAdd(o)
 		if not o or seen[o] or claimedAmmo[o] then return end
@@ -569,91 +637,27 @@ local function refreshAmmoCache(force)
 	if getnilinstances then
 		local ok, nilList = pcall(getnilinstances)
 		if ok and nilList then
-			for i = 1, #nilList do
-				tryAdd(nilList[i])
-				if i % 1000 == 0 then task.wait() end
-			end
+			for _, o in ipairs(nilList) do tryAdd(o) end
 		end
 	end
 
 	local itemsFolder = Workspace:FindFirstChild("Items")
-	if itemsFolder then
-		for _, o in ipairs(itemsFolder:GetDescendants()) do
-			tryAdd(o)
-		end
+	local scanRoot = itemsFolder or Workspace
+	for _, o in ipairs(scanRoot:GetDescendants()) do
+		tryAdd(o)
 	end
 
-	cachedAmmoList = found
-	return cachedAmmoList
-end
-
-local function tryClaimSingleAmmo(ammoObj)
-	if not ConsumeRF or not ammoObj then return false end
-	local okAlive = pcall(function() return ammoObj.Name end)
-	if not okAlive then return false end
-
-	local done, ok, res = false, false, nil
-	task.spawn(function()
-		ok, res = pcall(ConsumeRF.InvokeServer, ConsumeRF, ammoObj)
-		done = true
-	end)
-
-	local timeout = 0
-	while not done and timeout < 0.5 do
-		task.wait(0.05)
-		timeout += 0.05
-	end
-
-	return done and ok and res ~= false
-end
-
-local function collectScannedAmmo()
-	if not ConsumeRF then return 0 end
-	local list = refreshAmmoCache(false)
-	if #list == 0 then return 0 end
-
-	local now = os.clock()
 	local claimed = 0
-	for i = 1, math.min(#list, 12) do
+	for _, ammoObj in ipairs(found) do
 		if not CFG.AutoChestAndLoot then break end
-		local ammoObj = list[i]
-		if claimedAmmo[ammoObj] then continue end
-		local failT = failedAmmoAt[ammoObj]
-		if failT and (now - failT) < AMMO_FAIL_COOLDOWN then continue end
-
-		if tryClaimSingleAmmo(ammoObj) then
+		local ok = pcall(ConsumeRF.InvokeServer, ConsumeRF, ammoObj)
+		if ok then
 			claimedAmmo[ammoObj] = true
 			claimed += 1
 			totalAmmoCollected += 1
-		else
-			failedAmmoAt[ammoObj] = os.clock()
 		end
-		task.wait(0.05)
 	end
 	return claimed
-end
-
-local function isChestSkipped(chest, now)
-	if not chest or not chest.Parent then
-		cachedChests[chest] = nil
-		return true
-	end
-	if openedChestDone[chest] then return true end
-	local failT = failedChestAt[chest]
-	if failT and (now - failT) < CHEST_FAIL_COOLDOWN then
-		return true
-	end
-	return false
-end
-
-local function isLootSkipped(item, now)
-	if not item or not item.Parent then return true end
-	if lootedItems[item] then return true end
-	local failT = failedLootAt[item]
-	if failT and (now - failT) < LOOT_FAIL_COOLDOWN then
-		return true
-	end
-	return false
 end
 
 local function isValidChestLoot(obj, targetChest)
@@ -664,8 +668,6 @@ local function isValidChestLoot(obj, targetChest)
 
 	local ch = Player.Character
 	if ch and obj:IsDescendantOf(ch) then return false end
-	local inv = Player:FindFirstChild("Inventory")
-	if inv and obj:IsDescendantOf(inv) then return false end
 	if Players:GetPlayerFromCharacter(obj) then return false end
 
 	local name = obj.Name
@@ -673,19 +675,13 @@ local function isValidChestLoot(obj, targetChest)
 		return false
 	end
 
-	if obj:IsA("Tool") then return true end
-	if obj:IsA("Model") then
-		return (obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-			or obj:FindFirstChildWhichIsA("ClickDetector", true)
-			or obj:FindFirstChildWhichIsA("BasePart", true)) ~= nil
-	end
-	return false
+	return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
 end
 
 local overlapParams = OverlapParams.new()
 overlapParams.FilterType = Enum.RaycastFilterType.Exclude
 
-local function scanLootAtChestPos(chestPos, targetChest, now)
+local function scanLootAtChestPos(chestPos, targetChest)
 	local excludeList = { targetChest }
 	if Player.Character then table.insert(excludeList, Player.Character) end
 	overlapParams.FilterDescendantsInstances = excludeList
@@ -698,105 +694,89 @@ local function scanLootAtChestPos(chestPos, targetChest, now)
 			or part:FindFirstAncestorOfClass("Model")
 			or part
 
-		if candidate and not seen[candidate] then
+		if candidate and not seen[candidate] and not fireSentItems[candidate] then
 			seen[candidate] = true
-			if not isLootSkipped(candidate, now) and isValidChestLoot(candidate, targetChest) then
-				local p = partOf(candidate)
-				local dist = p and (p.Position - chestPos).Magnitude or CHEST_LOOT_RADIUS
-				table.insert(out, { obj = candidate, dist = dist })
+			if isValidChestLoot(candidate, targetChest) then
+				table.insert(out, candidate)
+			end
+		end
+	end
+	return out
+end
+
+local function tryTakeIntoBag(item)
+	if not HotbarItemRF or not item or not item.Parent then return false end
+	local inv = Player:FindFirstChild("Inventory")
+	local bag = Player:FindFirstChild("ItemBag")
+	local beforeInv = inv and #inv:GetChildren() or 0
+	local beforeBag = bag and #bag:GetChildren() or 0
+
+	local ok = pcall(HotbarItemRF.InvokeServer, HotbarItemRF, item)
+	if not ok then return false end
+
+	local nowInInv = (inv and item.Parent == inv) or (bag and item.Parent == bag) or (item.Parent == Player.Character)
+	local afterInv = inv and #inv:GetChildren() or 0
+	local afterBag = bag and #bag:GetChildren() or 0
+
+	return nowInInv or (afterInv > beforeInv) or (afterBag > beforeBag) or (not item.Parent)
+end
+
+local function processChestLootHighSpeed(chest, chestPos)
+	local items = scanLootAtChestPos(chestPos, chest)
+	if #items == 0 then return 0, 0 end
+
+	local bagNameSet = getPlayerBagNameSet()
+	local grabbed, toFire = 0, 0
+
+	for idx, item in ipairs(items) do
+		if not CFG.AutoChestAndLoot then break end
+		if not item or not item.Parent or fireSentItems[item] then continue end
+
+		-- 1. Kiểm tra xem vật phẩm đã có trong balo người chơi chưa
+		if isItemAlreadyInPlayerBag(item, bagNameSet) then
+			if tpItemToCampfire(item, idx) then
+				toFire += 1
+			end
+		else
+			-- 2. Chưa có trong balo -> thử đưa vào balo; nếu không đưa vào balo được thì TP về lửa trại
+			local isBagEligible = item:IsA("Tool") or item:IsA("Model")
+			local took = isBagEligible and tryTakeIntoBag(item) or false
+
+			if took then
+				lootedItems[item] = true
+				grabbed += 1
+				totalItemsLooted += 1
+				local okN, n = pcall(function() return item.Name end)
+				if okN and type(n) == "string" then
+					bagNameSet[string.lower(n)] = true
+				end
+			else
+				if tpItemToCampfire(item, idx) then
+					toFire += 1
+				end
 			end
 		end
 	end
 
-	table.sort(out, function(a, b) return a.dist < b.dist end)
-
-	local sortedItems = {}
-	for i = 1, #out do
-		sortedItems[i] = out[i].obj
-	end
-	return sortedItems
+	return grabbed, toFire
 end
 
-local function tryLootSingleItem(item)
-	if not HotbarItemRF then return false end
-	local inv = Player:FindFirstChild("Inventory")
-	local beforeCount = inv and #inv:GetChildren() or 0
-
-	local done, ok, res = false, false, nil
-	task.spawn(function()
-		ok, res = pcall(HotbarItemRF.InvokeServer, HotbarItemRF, item)
-		done = true
-	end)
-
-	local timeout = 0
-	while not done and timeout < 0.5 do
-		task.wait(0.05)
-		timeout += 0.05
-	end
-
-	if not done or not ok or res == false then
-		return false
-	end
-
-	local nowInInv = (inv and item.Parent == inv) or (item.Parent == Player.Character)
-	local afterCount = inv and #inv:GetChildren() or 0
-
-	return nowInInv or afterCount > beforeCount or not item.Parent
-end
-
-local function openSingleChest(chest)
-	if not OpenChestRE or not chest or not chest.Parent then return false end
-	local ok = pcall(OpenChestRE.FireServer, OpenChestRE, chest)
-	return ok == true
-end
-
-local function lootItemsAtChest(chest, chestPos)
-	local now = os.clock()
-	local items = scanLootAtChestPos(chestPos, chest, now)
-	if #items == 0 then
-		return 0, 0
-	end
-
-	local grabbed, skipped = 0, 0
-	for i = 1, math.min(#items, 15) do
-		if not CFG.AutoChestAndLoot then break end
-		local item = items[i]
-		if isLootSkipped(item, os.clock()) then continue end
-
-		if tryLootSingleItem(item) then
-			lootedItems[item] = true
-			grabbed += 1
-			totalItemsLooted += 1
-		else
-			failedLootAt[item] = os.clock()
-			skipped += 1
-		end
-		task.wait(0.06)
-	end
-	return grabbed, skipped
-end
-
-local function processNextChestStep()
+local function processNextChestStepFast()
 	if not OpenChestRE then
 		updateChestLootStatus("❌ Thiếu remote RequestOpenItemChest")
-		return
-	end
-	if not HotbarItemRF then
-		updateChestLootStatus("❌ Thiếu remote RequestHotbarItem")
 		return
 	end
 
 	initChestCache()
 
-	local now = os.clock()
 	local targetChest = nil
 	local targetPos   = nil
 	local r = root()
 	local rPos = r and r.Position
-
 	local bestDist = math.huge
+
 	for chest, _ in pairs(cachedChests) do
-		if not isChestSkipped(chest, now) then
+		if chest and chest.Parent then
 			local p = partOf(chest)
 			if p then
 				local d = rPos and (p.Position - rPos).Magnitude or 0
@@ -806,63 +786,45 @@ local function processNextChestStep()
 					targetPos = p.Position
 				end
 			end
+		else
+			cachedChests[chest] = nil
 		end
 	end
 
 	if not targetChest or not targetPos then
-		local ammoGot = collectScannedAmmo()
+		local ammoGot = collectAllAmmoFast()
 		updateChestLootStatus(
-			string.format("✅ Hết rương · Rương: %d | Đồ: %d | Đạn: %d (+%d)",
-				totalChestsOpened, totalItemsLooted, totalAmmoCollected, ammoGot)
+			string.format("⚡ Nhặt:%d | →Lửa:%d | Đạn:%d (+%d)",
+				totalItemsLooted, totalSentToFire, totalAmmoCollected, ammoGot)
 		)
 		return
 	end
 
-	updateChestLootStatus("📦 Đang mở: " .. tostring(targetChest.Name))
-	local openedOk = openSingleChest(targetChest)
-	if not openedOk or not targetChest.Parent then
-		failedChestAt[targetChest] = os.clock()
-		local ammoGot = collectScannedAmmo()
-		updateChestLootStatus(
-			string.format("⏭️ Bỏ qua rương lỗi (%s) · Đạn +%d", tostring(targetChest.Name), ammoGot)
-		)
-		return
-	end
-
-	task.wait(0.35)
-	if not CFG.AutoChestAndLoot then return end
+	pcall(OpenChestRE.FireServer, OpenChestRE, targetChest)
 
 	local currentChestPart = partOf(targetChest)
 	local scanPos = currentChestPart and currentChestPart.Position or targetPos
 
-	updateChestLootStatus("🎒 Đang nhặt đồ & đạn: " .. tostring(targetChest.Name))
-	local grabbed, skipped = lootItemsAtChest(targetChest, scanPos)
-	local ammoGot = collectScannedAmmo()
+	local grabbed, toFire = processChestLootHighSpeed(targetChest, scanPos)
+	local ammoGot = collectAllAmmoFast()
 
-	if grabbed > 0 or ammoGot > 0 or targetChest.Parent then
-		openedChestDone[targetChest] = true
+	if grabbed > 0 or toFire > 0 or ammoGot > 0 then
 		totalChestsOpened += 1
-		updateChestLootStatus(
-			string.format("📦 #%d (%s) +%d đồ +%d đạn · Tổng: %d đồ / %d đạn",
-				totalChestsOpened, tostring(targetChest.Name), grabbed, ammoGot,
-				totalItemsLooted, totalAmmoCollected)
-		)
-	else
-		failedChestAt[targetChest] = os.clock()
-		updateChestLootStatus(
-			string.format("⏭️ Bỏ qua rương trống (%s) · Tổng: %d đồ / %d đạn",
-				tostring(targetChest.Name), totalItemsLooted, totalAmmoCollected)
-		)
 	end
+
+	updateChestLootStatus(
+		string.format("⚡ Rương:%d | Nhặt:%d (+%d) | →Lửa:%d (+%d) | Đạn:%d",
+			totalChestsOpened, totalItemsLooted, grabbed, totalSentToFire, toFire, totalAmmoCollected)
+	)
 end
 
 task.spawn(function()
 	while true do
 		if CFG.AutoChestAndLoot then
-			pcall(processNextChestStep)
+			pcall(processNextChestStepFast)
 			task.wait(STEP_WAIT_SECONDS)
 		else
-			task.wait(0.5)
+			task.wait(0.25)
 		end
 	end
 end)
@@ -1511,7 +1473,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- TP, PULL, REBUILT CAMPFIRE FUEL & AUTO SCRAPPER
+-- TP, PULL, CONTINUOUS FIRE FUEL & FULL-MAP SCRAPPER TP
 --========================================================
 
 local function tpTo(m)
@@ -1540,31 +1502,12 @@ local function pullPlayerToMe(plr)
 	return false
 end
 
-local function moveItemToCFrame(obj, goalCF)
-	if not obj or not obj.Parent then return false end
-	local ok = pcall(function()
-		if DragRE then
-			pcall(DragRE.FireServer, DragRE, obj)
-		end
-		if obj:IsA("Model") then
-			obj:PivotTo(goalCF)
-		elseif obj:IsA("BasePart") then
-			obj.CFrame = goalCF
-		end
-	end)
-	task.wait(0.04)
-	if StopDragRE then
-		pcall(StopDragRE.FireServer, StopDragRE, obj)
-	end
-	return ok == true
-end
-
 local function pullAllExact(nameList)
 	local r = root(); if not r then return 0 end
 	local ch = Player.Character
 	local found = {}
 	local itemsFolder = Workspace:FindFirstChild("Items")
-	local searchList  = itemsFolder and itemsFolder:GetDescendants() or Workspace:GetChildren()
+	local searchList  = itemsFolder and itemsFolder:GetDescendants() or Workspace:GetDescendants()
 
 	for _, o in ipairs(searchList) do
 		local okSkip = pcall(function()
@@ -1586,7 +1529,7 @@ local function pullAllExact(nameList)
 
 	table.sort(found, function(a,b) return a.dist < b.dist end)
 	local count = 0
-	for i = 1, math.min(#found, 20) do
+	for i = 1, #found do
 		local o = found[i].obj
 		local rr = root(); if not rr then break end
 		local spreadX = ((count % 3) - 1) * 1.4
@@ -1595,16 +1538,15 @@ local function pullAllExact(nameList)
 		if moveItemToCFrame(o, goalCF) then
 			count += 1
 		end
-		task.wait(0.08)
+		if count % 15 == 0 then task.wait(0.03) end
 	end
 	return count
 end
 
--- REBUILT CAMPFIRE AUTO FUEL (SAFE & NON-BLOCKING)
+-- CONTINUOUS CAMPFIRE AUTO FUEL (NO LOG/CHAIR, NO COOLDOWN, NO CAP)
 local fireStatusText = "Chờ bật auto dồn lửa trại..."
 local fireStatusLbl  = nil
 local isDumpingFuel  = false
-local droppedFuelAt  = setmetatable({}, { __mode = "k" })
 local totalFuelMoved = 0
 
 local function updateFireStatus(txt)
@@ -1626,52 +1568,46 @@ local function dumpFuelToFire()
 		end
 
 		local ch = Player.Character
-		local itemsFolder = Workspace:FindFirstChild("Items")
-		local scanList = itemsFolder and itemsFolder:GetDescendants() or Workspace:GetChildren()
+		local allObjs = Workspace:GetDescendants()
 		local candidates = {}
-		local now = os.clock()
 
-		for _, o in ipairs(scanList) do
+		for i = 1, #allObjs do
+			local o = allObjs[i]
 			if o and o.Parent and (o:IsA("Model") or o:IsA("BasePart")) then
-				local lastT = droppedFuelAt[o]
-				if not (lastT and (now - lastT) < 18) then
-					local skip = (ch and o:IsDescendantOf(ch)) or Players:GetPlayerFromCharacter(o) ~= nil
-					if not skip then
-						local okN, oName = pcall(function() return o.Name end)
-						if okN and matchesExact(oName, FUEL_EXACT) then
-							local p = partOf(o)
-							if p and (p.Position - fp.Position).Magnitude > 14 then
-								table.insert(candidates, { obj = o, pos = p.Position })
-							end
+				local skip = (ch and o:IsDescendantOf(ch)) or Players:GetPlayerFromCharacter(o) ~= nil
+				if not skip then
+					local okN, oName = pcall(function() return o.Name end)
+					if okN and matchesExact(oName, FUEL_EXACT) then
+						local p = partOf(o)
+						if p and (p.Position - fp.Position).Magnitude > 14 then
+							table.insert(candidates, o)
 						end
 					end
 				end
 			end
+			if i % 900 == 0 then task.wait() end
 		end
 
 		if #candidates == 0 then
-			updateFireStatus(string.format("✅ Không còn nhiên liệu · Đã dồn: %d", totalFuelMoved))
+			updateFireStatus(string.format("🔥 Đang quét liên tục · Đã dồn: %d", totalFuelMoved))
 			return 0
 		end
 
 		local count = 0
-		local limit = math.min(#candidates, 12)
-		for i = 1, limit do
-			if not CFG.AutoDrop and i > 1 then break end
-			local item = candidates[i].obj
+		for i = 1, #candidates do
+			local item = candidates[i]
 			if item and item.Parent and fp and fp.Parent then
-				droppedFuelAt[item] = os.clock()
 				local offset = Vector3.new(
-					math.random(-20, 20) / 10,
-					5.5 + (count % 5) * 0.5,
-					math.random(-20, 20) / 10
+					math.random(-22, 22) / 10,
+					5.5 + (count % 6) * 0.45,
+					math.random(-22, 22) / 10
 				)
 				if moveItemToCFrame(item, CFrame.new(fp.Position + offset)) then
 					count += 1
 					totalFuelMoved += 1
 				end
 			end
-			task.wait(0.12)
+			if count % 15 == 0 then task.wait(0.03) end
 		end
 
 		updateFireStatus(string.format("🔥 Đã dồn +%d nhiên liệu (Tổng: %d)", count, totalFuelMoved))
@@ -1681,7 +1617,7 @@ local function dumpFuelToFire()
 	isDumpingFuel = false
 	if not okRun then
 		cachedFirePart = nil
-		updateFireStatus("⚠️ Đang tự phục hồi luồng lửa trại...")
+		updateFireStatus("⚠️ Đang làm mới vị trí lửa trại...")
 		return 0
 	end
 	return moved or 0
@@ -1691,19 +1627,18 @@ task.spawn(function()
 	while true do
 		if CFG.AutoDrop then
 			pcall(dumpFuelToFire)
-			task.wait(3.5)
+			task.wait(0.15)
 		else
-			task.wait(0.5)
+			task.wait(0.35)
 		end
 	end
 end)
 
--- AUTO TP SCRAPPER (IRON / LOG / CHAIR)
-local scrapStatusText  = "Chờ bật auto TP Scrapper..."
-local scrapStatusLbl   = nil
-local isMovingScrap    = false
-local movedScrapAt     = setmetatable({}, { __mode = "k" })
-local totalScrapMoved  = 0
+-- FULL-MAP CONTINUOUS AUTO SCRAPPER TP (NO PLAYER TP, NO CAP)
+local scrapStatusText = "Chờ bật auto TP Scrapper..."
+local scrapStatusLbl  = nil
+local isMovingScrap   = false
+local totalScrapMoved = 0
 
 local function updateScrapStatus(txt)
 	scrapStatusText = txt
@@ -1732,67 +1667,49 @@ local function sendScrapToScrapper()
 		end
 
 		local ch = Player.Character
-		local itemsFolder = Workspace:FindFirstChild("Items")
-		local scanList = itemsFolder and itemsFolder:GetDescendants() or Workspace:GetChildren()
+		local allObjs = Workspace:GetDescendants()
 		local candidates = {}
-		local now = os.clock()
 
-		for _, o in ipairs(scanList) do
+		for i = 1, #allObjs do
+			local o = allObjs[i]
 			if o and o.Parent and (o:IsA("Model") or o:IsA("BasePart")) then
-				local lastT = movedScrapAt[o]
-				if not (lastT and (now - lastT) < 18) then
-					local skip = (ch and o:IsDescendantOf(ch)) or Players:GetPlayerFromCharacter(o) ~= nil
-					if not skip then
-						local okN, oName = pcall(function() return o.Name end)
-						if okN and isScrapCandidateName(oName) then
-							local p = partOf(o)
-							if p and (p.Position - sp.Position).Magnitude > 12 then
-								table.insert(candidates, { obj = o, pos = p.Position })
-							end
+				local skip = (ch and o:IsDescendantOf(ch)) or Players:GetPlayerFromCharacter(o) ~= nil
+				if not skip then
+					local okN, oName = pcall(function() return o.Name end)
+					if okN and isScrapCandidateName(oName) then
+						local p = partOf(o)
+						if p and (p.Position - sp.Position).Magnitude > 12 then
+							table.insert(candidates, o)
 						end
 					end
 				end
 			end
+			if i % 900 == 0 then task.wait() end
 		end
 
 		if #candidates == 0 then
-			updateScrapStatus(string.format("✅ Hết sắt/log/ghế · Đã đưa: %d", totalScrapMoved))
+			updateScrapStatus(string.format("⚙️ Đang quét toàn map · Đã đưa: %d", totalScrapMoved))
 			return 0
 		end
 
-		local r = root()
 		local count = 0
-		local limit = math.min(#candidates, 12)
-		for i = 1, limit do
-			if not CFG.AutoScrapper and i > 1 then break end
-			local item = candidates[i].obj
+		for i = 1, #candidates do
+			local item = candidates[i]
 			if item and item.Parent and sp and sp.Parent then
-				movedScrapAt[item] = os.clock()
-				-- TP nhân vật tới sát vật phẩm trước khi đưa vào Scrapper để đảm bảo quyền thao tác
-				if r and r.Parent then
-					r.CFrame = CFrame.new(candidates[i].pos + Vector3.new(0, 3, -2.5))
-					task.wait(0.06)
-				end
 				local dropCF = CFrame.new(sp.Position + Vector3.new(
-					math.random(-15, 15) / 10,
-					4.5 + (count % 4) * 0.45,
-					math.random(-15, 15) / 10
+					math.random(-20, 20) / 10,
+					4.5 + (count % 6) * 0.45,
+					math.random(-20, 20) / 10
 				))
 				if moveItemToCFrame(item, dropCF) then
 					count += 1
 					totalScrapMoved += 1
 				end
 			end
-			task.wait(0.12)
+			if count % 15 == 0 then task.wait(0.03) end
 		end
 
-		-- Sau khi đưa xong đợt, TP về gần Scrapper
-		r = root()
-		if r and r.Parent and sp and sp.Parent then
-			r.CFrame = CFrame.new(sp.Position + Vector3.new(0, 3.5, 3))
-		end
-
-		updateScrapStatus(string.format("⚙️ Đã đưa +%d sắt/log/ghế (Tổng: %d)", count, totalScrapMoved))
+		updateScrapStatus(string.format("⚙️ Đã đưa +%d nguyên liệu (Tổng: %d)", count, totalScrapMoved))
 		return count
 	end)
 
@@ -1809,9 +1726,9 @@ task.spawn(function()
 	while true do
 		if CFG.AutoScrapper then
 			pcall(sendScrapToScrapper)
-			task.wait(3.5)
+			task.wait(0.15)
 		else
-			task.wait(0.5)
+			task.wait(0.35)
 		end
 	end
 end)
@@ -2399,14 +2316,12 @@ do
 	sCombat:AddSlider("Delay (x10ms)", 5, 60, math.floor(CFG.Delay * 100), function(v) CFG.Delay = v / 100 end)
 
 	local sChest = TabMain:AddSection("RƯƠNG, ĐẠN & ĐỒNG XU")
-	sChest:AddToggle("Mở rương + nhặt đồ & đạn (2s)", CFG.AutoChestAndLoot, function(v)
+	sChest:AddToggle("Auto Rương Tốc Độ Cao", CFG.AutoChestAndLoot, function(v)
 		CFG.AutoChestAndLoot = v
-		if v then
-			task.spawn(function() refreshAmmoCache(true) end)
-		else
+		if not v then
 			updateChestLootStatus(
-				string.format("Tắt · Rương: %d | Đồ: %d | Đạn: %d",
-					totalChestsOpened, totalItemsLooted, totalAmmoCollected)
+				string.format("Tắt · Nhặt:%d | →Lửa:%d | Đạn:%d",
+					totalItemsLooted, totalSentToFire, totalAmmoCollected)
 			)
 		end
 	end)
@@ -2517,9 +2432,9 @@ end
 -- TAB 4: TP & ĐỒ
 local TabItems = Win:CreateTab("TP & Đồ")
 do
-	local sFire = TabItems:AddSection("LỬA TRẠI & NHIÊN LIỆU")
+	local sFire = TabItems:AddSection("LỬA TRẠI & NHIÊN LIỆU (NO LOG/CHAIR)")
 	sFire:AddButton("🔥 TP Lửa trại", tpCampfire)
-	sFire:AddToggle("Auto dồn nhiên liệu → Lửa", CFG.AutoDrop, function(v)
+	sFire:AddToggle("Auto dồn nhiên liệu → Lửa (Liên tục)", CFG.AutoDrop, function(v)
 		CFG.AutoDrop = v
 		if v then
 			task.spawn(dumpFuelToFire)
@@ -2532,9 +2447,9 @@ do
 		task.spawn(dumpFuelToFire)
 	end)
 
-	local sScrap = TabItems:AddSection("SCRAPPER (SẮT, LOG, GHẾ GỖ)")
+	local sScrap = TabItems:AddSection("SCRAPPER (FULL MAP · KHÔNG TP NGƯỜI)")
 	sScrap:AddButton("⚙️ TP Scrapper", tpScrapper)
-	sScrap:AddToggle("Auto TP sắt/log/ghế → Scrapper", CFG.AutoScrapper, function(v)
+	sScrap:AddToggle("Auto TP nguyên liệu → Scrapper", CFG.AutoScrapper, function(v)
 		CFG.AutoScrapper = v
 		if v then
 			task.spawn(sendScrapToScrapper)
@@ -2543,7 +2458,7 @@ do
 		end
 	end)
 	scrapStatusLbl = sScrap:AddLabel(scrapStatusText)
-	sScrap:AddButton("🔩 Đưa sắt/log/ghế → Scrapper ngay", function()
+	sScrap:AddButton("🔩 Đưa nguyên liệu → Scrapper ngay", function()
 		task.spawn(sendScrapToScrapper)
 	end)
 
