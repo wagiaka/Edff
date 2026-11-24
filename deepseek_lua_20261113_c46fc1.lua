@@ -1,9 +1,9 @@
 --========================================================
 -- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & OPTIMIZED)
+-- God Mode | Custom Item Filter Tables for Fire & Scrapper
 -- TP Auto Chop (Exact Tree Name Filter + Anti-Lose Axe Fix)
 -- Independent Kill Aura + Conflict Warning | Auto Rescue Children
 -- Cached Chest (multi-open, 1 item/chest, filter & beside-chest) + Ammo + Coins
--- Auto Scrapper | Zero-Lag Mobile Ready
 --========================================================
 
 local Players      = game:GetService("Players")
@@ -90,11 +90,11 @@ local IGNORE_LOOT_KEYS = {
 }
 
 local CFG = {
+	GodMode=false,
 	Speed=false,            WalkSpeed=40,
 	Jump=false,             JumpPower=90,
 	Fly=false,              FlySpeed=60,
 	Noclip=false,
-	GodMode=false,
 	KillAura=false,         KillRadius=150,
 	AutoChop=false,         ChopRadius=130,
 	AutoDrop=false,
@@ -108,6 +108,17 @@ local CFG = {
 	FixLag=false,
 	Delay=0.35,
 }
+
+-- Bảng trạng thái cho phép/chặn TP của từng vật phẩm
+local FireAllowedItems = {}
+for _, itemName in ipairs(FUEL_EXACT) do
+	FireAllowedItems[itemName] = true
+end
+
+local ScrapAllowedItems = {}
+for _, itemName in ipairs(SCRAPPER_ITEMS) do
+	ScrapAllowedItems[itemName] = true
+end
 
 local MAX_KILL_PER_CYCLE = 6
 local TOOL_SUFFIX = "11960515286"
@@ -179,7 +190,7 @@ local function getFallbackTool(inv, char)
 			if item:IsA("Model") then return item end
 		end
 	end
-	return char and char:FindFirstChild("Tool")
+	return char and char:FindFirstChildWhichIsA("Tool")
 end
 
 local function getKillTool()
@@ -252,6 +263,108 @@ local function getNilByName(name)
 	end
 	return out
 end
+
+--========================================================
+-- GOD MODE (CLIENT HEALTH LOCK & ANTI-DEATH)
+--========================================================
+
+local godCharConns = {}
+
+local function clearGodConns()
+	for _, conn in ipairs(godCharConns) do
+		pcall(function() conn:Disconnect() end)
+	end
+	godCharConns = {}
+end
+
+local function bindGodModeToChar(char)
+	clearGodConns()
+	if not char then return end
+
+	local function hookHum(h)
+		if not h then return end
+		pcall(function()
+			h:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+		end)
+
+		local c1 = h.HealthChanged:Connect(function(hp)
+			if CFG.GodMode and hp < h.MaxHealth then
+				pcall(function()
+					if h.MaxHealth <= 0 or h.MaxHealth == math.huge then
+						h.MaxHealth = 100
+					end
+					h.Health = h.MaxHealth
+				end)
+			end
+		end)
+
+		local c2 = h.StateChanged:Connect(function(_, newState)
+			if CFG.GodMode and newState == Enum.HumanoidStateType.Dead then
+				pcall(function()
+					h:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+					h.Health = h.MaxHealth > 0 and h.MaxHealth or 100
+					h:ChangeState(Enum.HumanoidStateType.Running)
+				end)
+			end
+		end)
+
+		table.insert(godCharConns, c1)
+		table.insert(godCharConns, c2)
+	end
+
+	local existingHum = char:FindFirstChildOfClass("Humanoid")
+	if existingHum then
+		hookHum(existingHum)
+	end
+
+	local cAdd = char.ChildAdded:Connect(function(child)
+		if child:IsA("Humanoid") then
+			hookHum(child)
+		end
+	end)
+	table.insert(godCharConns, cAdd)
+end
+
+local function setGodMode(state)
+	CFG.GodMode = state
+	local c = Player.Character
+	local h = hum()
+	if state then
+		if c then bindGodModeToChar(c) end
+		if h then
+			pcall(function()
+				h:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+				h.Health = h.MaxHealth > 0 and h.MaxHealth or 100
+			end)
+		end
+	else
+		clearGodConns()
+		if h then
+			pcall(function()
+				h:SetStateEnabled(Enum.HumanoidStateType.Dead, true)
+			end)
+		end
+	end
+end
+
+RunService.Heartbeat:Connect(function()
+	if not CFG.GodMode then return end
+	local c = Player.Character
+	if not c then return end
+	local h = c:FindFirstChildOfClass("Humanoid")
+	if h then
+		if h.MaxHealth <= 0 then h.MaxHealth = 100 end
+		if h.Health < h.MaxHealth then
+			h.Health = h.MaxHealth
+		end
+	end
+	-- Xóa ForceField hay trạng thái sát thương nếu có
+	for _, part in ipairs(c:GetChildren()) do
+		if part:IsA("BasePart") and part.Velocity.Y < -140 then
+			part.AssemblyLinearVelocity = Vector3.new(part.AssemblyLinearVelocity.X, -40, part.AssemblyLinearVelocity.Z)
+		end
+	end
+end)
 
 --========================================================
 -- EVENT-BASED CACHE: CHILDREN (NO WORKSPACE LAG)
@@ -729,7 +842,9 @@ local function openSingleChest(chest)
 	return ok == true
 end
 
+-- ===== BỘ LỌC VẬT PHẨM RƯƠNG =====
 local Filter = {}
+
 Filter.wanted = {}
 local CHEST_WANTED_LIST = {
 	"Bandage","Good Sack","Good Axe","Old Flashlight","Spear","Revolver","Fuel Canister",
@@ -1532,83 +1647,11 @@ local function startFly()
 	end)
 end
 
-Player.CharacterAdded:Connect(function()
-	task.wait(0.5); resetCounter()
-	if CFG.Fly then startFly() end
-end)
-
---========================================================
--- GOD MODE SYSTEM
---========================================================
-
-local NPCAttackRE = Remotes and Remotes:FindFirstChild("ClientTriggerNPCAttack")
-local godConn = nil
-local godHPText = "HP: --"
-local godHPLbl  = nil
-
-local function updateGodHP(txt)
-	godHPText = txt
-	if godHPLbl and godHPLbl.Parent then
-		godHPLbl.Text = txt
-	end
-end
-
-local function getNearestNPC()
-	local r = root()
-	local rPos = r and r.Position
-	local best, bestD = nil, math.huge
-	local function tryNPC(o)
-		if not o:IsA("Model") then return end
-		if Players:GetPlayerFromCharacter(o) then return end
-		if o == Player.Character then return end
-		local h = o:FindFirstChildWhichIsA("Humanoid", true)
-		if not (h and h.Health > 0) then return end
-		local p = partOf(o)
-		if not p then return end
-		local d = rPos and (p.Position - rPos).Magnitude or 0
-		if d < bestD then best = o; bestD = d end
-	end
-	for _, o in ipairs(Workspace:GetChildren()) do tryNPC(o) end
-	for _, fn in ipairs(SCAN_FOLDERS) do
-		local folder = Workspace:FindFirstChild(fn)
-		if folder then
-			for _, o in ipairs(folder:GetChildren()) do tryNPC(o) end
-		end
-	end
-	return best
-end
-
-local function startGodMode()
-	if godConn then godConn:Disconnect(); godConn = nil end
-	godConn = RunService.Heartbeat:Connect(function()
-		if not CFG.GodMode then
-			godConn:Disconnect(); godConn = nil
-			updateGodHP("HP: --")
-			return
-		end
-		local h = hum()
-		if h then
-			if h.Health < h.MaxHealth then h.Health = h.MaxHealth end
-			h.AutoRotate = true
-			updateGodHP(string.format("🛡️ God Mode BẬT · HP: %d / %d", math.floor(h.Health), math.floor(h.MaxHealth)))
-		end
-		if NPCAttackRE and (tick() % 0.5) < 0.016 then
-			local decoy = getNearestNPC()
-			if decoy then pcall(NPCAttackRE.FireServer, NPCAttackRE, decoy) end
-		end
-	end)
-end
-
-local function stopGodMode()
-	if godConn then godConn:Disconnect(); godConn = nil end
-	local h = hum()
-	if h and h.Health <= 0 then h.Health = h.MaxHealth end
-	updateGodHP("HP: --")
-end
-
-Player.CharacterAdded:Connect(function()
+Player.CharacterAdded:Connect(function(char)
 	task.wait(0.5)
-	if CFG.GodMode then startGodMode() end
+	resetCounter()
+	if CFG.GodMode then bindGodModeToChar(char) end
+	if CFG.Fly then startFly() end
 end)
 
 --========================================================
@@ -1832,7 +1875,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- TP, PULL, FUEL, SCRAPPER & PLANT ACTIONS (OPTIMIZED)
+-- TP, PULL, FUEL (FILTERED), SCRAPPER (FILTERED) & PLANT ACTIONS
 --========================================================
 
 local function tpTo(m)
@@ -1904,6 +1947,7 @@ local function pullAllExact(nameList)
 	return count
 end
 
+-- ===== LỬA TRẠI (CÓ BẢNG LỌC CHO PHÉP / CẤM TP) =====
 local droppedAt = {}
 local function dumpFuelToFire()
 	local fp = getFirePart()
@@ -1918,7 +1962,9 @@ local function dumpFuelToFire()
 		if ch and o:IsDescendantOf(ch) then continue end
 		if Players:GetPlayerFromCharacter(o) then continue end
 		if (droppedAt[o] or 0) + 20 > os.clock() then continue end
-		if not matchesExact(o.Name, FUEL_EXACT) then continue end
+		-- Chỉ TP những vật phẩm được tích chọn cho phép trong bảng FireAllowedItems
+		if not FireAllowedItems[o.Name] then continue end
+
 		seen[o] = true
 		if not o.PrimaryPart then pcall(function() o.PrimaryPart = partOf(o) end) end
 		if not o.PrimaryPart then continue end
@@ -1940,6 +1986,7 @@ task.spawn(function()
 	end
 end)
 
+-- ===== SCRAPPER (CÓ BẢNG LỌC CHO PHÉP / CẤM TP) =====
 local cachedScrapperPart = nil
 local function getScrapperPart()
 	if cachedScrapperPart and cachedScrapperPart.Parent then
@@ -1966,7 +2013,8 @@ local function dumpScrapToScrapper()
 		if ch and o:IsDescendantOf(ch) then continue end
 		if Players:GetPlayerFromCharacter(o) then continue end
 		if (scrapDroppedAt[o] or 0) + 15 > os.clock() then continue end
-		if not matchesExact(o.Name, SCRAPPER_ITEMS) then continue end
+		-- Chỉ TP những vật phẩm được tích chọn cho phép trong bảng ScrapAllowedItems
+		if not ScrapAllowedItems[o.Name] then continue end
 
 		seen[o] = true
 		if not o.PrimaryPart then pcall(function() o.PrimaryPart = partOf(o) end) end
@@ -2046,55 +2094,22 @@ local function revealMap()
 end
 
 --========================================================
--- SUNSET UI LIBRARY (SAFE PARENT + SAFE TAB ACTIVATION)
+-- SUNSET UI LIBRARY
 --========================================================
-
-local function attachGuiSafely(guiObj)
-	guiObj.Parent = PlayerGui
-	pcall(function()
-		if gethui then
-			local hui = gethui()
-			if hui then guiObj.Parent = hui; return end
-		end
-	end)
-	pcall(function()
-		if CoreGui and CoreGui.Name == "CoreGui" then
-			local test = Instance.new("Folder")
-			test.Parent = CoreGui
-			test:Destroy()
-			guiObj.Parent = CoreGui
-		end
-	end)
-end
-
-local function triggerButtonClick(btn)
-	if not btn then return end
-	if type(firesignal) == "function" then
-		local ok = pcall(firesignal, btn.MouseButton1Click)
-		if ok then return end
-	end
-	if type(getconnections) == "function" then
-		local ok, conns = pcall(getconnections, btn.MouseButton1Click)
-		if ok and type(conns) == "table" then
-			for _, c in ipairs(conns) do
-				if c and c.Function then
-					pcall(c.Function)
-				end
-			end
-			return
-		end
-	end
-end
 
 local Library = {}
 
 function Library:CreateWindow(title)
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "SunsetUI"
+	gui.Parent = CoreGui.Parent and CoreGui or PlayerGui
+	pcall(function() gui.Parent = CoreGui end)
+	if gui.Parent ~= CoreGui then
+		gui.Parent = PlayerGui
+	end
 	gui.IgnoreGuiInset = true
 	gui.ResetOnSpawn = false
 	gui.DisplayOrder = 100
-	attachGuiSafely(gui)
 
 	local currentColor = Color3.fromRGB(255, 128, 0)
 	local toggleButton = nil
@@ -2181,7 +2196,6 @@ function Library:CreateWindow(title)
 	mainFrame.Position = UDim2.new(0.5, -225, 0.5, -190)
 	mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 	mainFrame.BackgroundTransparency = 0.2
-	mainFrame.Visible = true
 	mainFrame.Parent = gui
 	Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 
@@ -2238,7 +2252,7 @@ function Library:CreateWindow(title)
 
 	local currentTab
 	local tabY = 35
-	local tabEntries = {}
+	local tabOrderList = {}
 
 	local windowFunctions = {}
 
@@ -2254,6 +2268,7 @@ function Library:CreateWindow(title)
 		btn.Parent = sidebarFrame
 		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
 		tabY = tabY + 33
+		table.insert(tabOrderList, btn)
 
 		local Tab = Instance.new("ScrollingFrame")
 		Tab.Size = UDim2.new(1, 0, 1, 0)
@@ -2276,7 +2291,7 @@ function Library:CreateWindow(title)
 		pad.PaddingTop = UDim.new(0, 8)
 		pad.PaddingBottom = UDim.new(0, 10)
 
-		local function selectThisTab()
+		btn.MouseButton1Click:Connect(function()
 			for _, child in ipairs(sidebarFrame:GetChildren()) do
 				if child:IsA("TextButton") then
 					child.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
@@ -2288,10 +2303,7 @@ function Library:CreateWindow(title)
 			if currentTab then currentTab.Visible = false end
 			currentTab = Tab
 			Tab.Visible = true
-		end
-
-		btn.MouseButton1Click:Connect(selectThisTab)
-		table.insert(tabEntries, { btn = btn, selectFn = selectThisTab })
+		end)
 
 		local Elements = {}
 
@@ -2424,6 +2436,144 @@ function Library:CreateWindow(title)
 				return f
 			end
 
+			-- BẢNG CHỌN VẬT PHẨM CHO PHÉP / KHÔNG CHO PHÉP TP (DẠNG LƯỚI 2 CỘT)
+			function Section:AddItemFilterTable(tableTitle, itemList, stateMap)
+				local wrap = Instance.new("Frame")
+				wrap.Size = UDim2.new(1, -12, 0, 0)
+				wrap.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+				wrap.AutomaticSize = Enum.AutomaticSize.Y
+				wrap.Parent = container
+				Instance.new("UICorner", wrap).CornerRadius = UDim.new(0, 6)
+
+				local st = Instance.new("UIStroke", wrap)
+				st.Color = Color3.fromRGB(70, 70, 70)
+				st.Thickness = 1
+
+				local wLayout = Instance.new("UIListLayout", wrap)
+				wLayout.Padding = UDim.new(0, 5)
+				wLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+				local wPad = Instance.new("UIPadding", wrap)
+				wPad.PaddingTop = UDim.new(0, 6)
+				wPad.PaddingBottom = UDim.new(0, 6)
+				wPad.PaddingLeft = UDim.new(0, 6)
+				wPad.PaddingRight = UDim.new(0, 6)
+
+				local header = Instance.new("TextLabel")
+				header.Size = UDim2.new(1, 0, 0, 18)
+				header.BackgroundTransparency = 1
+				header.Text = tableTitle
+				header.TextColor3 = currentColor
+				header.Font = Enum.Font.GothamBold
+				header.TextSize = 11
+				header.TextXAlignment = Enum.TextXAlignment.Left
+				header.Parent = wrap
+
+				local sub = Instance.new("TextLabel")
+				sub.Size = UDim2.new(1, 0, 0, 14)
+				sub.BackgroundTransparency = 1
+				sub.Text = "✓ Xanh = Cho phép TP | ✕ Đỏ = Chặn TP"
+				sub.TextColor3 = Color3.fromRGB(180, 180, 180)
+				sub.Font = Enum.Font.Gotham
+				sub.TextSize = 10
+				sub.TextXAlignment = Enum.TextXAlignment.Left
+				sub.Parent = wrap
+
+				-- Hàng nút Chọn tất cả / Bỏ chọn tất cả
+				local bulkRow = Instance.new("Frame")
+				bulkRow.Size = UDim2.new(1, 0, 0, 24)
+				bulkRow.BackgroundTransparency = 1
+				bulkRow.Parent = wrap
+
+				local btnAll = Instance.new("TextButton")
+				btnAll.Size = UDim2.new(0.485, 0, 1, 0)
+				btnAll.Position = UDim2.new(0, 0, 0, 0)
+				btnAll.BackgroundColor3 = Color3.fromRGB(32, 85, 45)
+				btnAll.Text = "✓ Cho phép tất cả"
+				btnAll.TextColor3 = Color3.fromRGB(220, 255, 220)
+				btnAll.Font = Enum.Font.GothamBold
+				btnAll.TextSize = 10
+				btnAll.Parent = bulkRow
+				Instance.new("UICorner", btnAll).CornerRadius = UDim.new(0, 4)
+
+				local btnNone = Instance.new("TextButton")
+				btnNone.Size = UDim2.new(0.485, 0, 1, 0)
+				btnNone.Position = UDim2.new(0.515, 0, 0, 0)
+				btnNone.BackgroundColor3 = Color3.fromRGB(95, 35, 35)
+				btnNone.Text = "✕ Chặn tất cả"
+				btnNone.TextColor3 = Color3.fromRGB(255, 220, 220)
+				btnNone.Font = Enum.Font.GothamBold
+				btnNone.TextSize = 10
+				btnNone.Parent = bulkRow
+				Instance.new("UICorner", btnNone).CornerRadius = UDim.new(0, 4)
+
+				-- Lưới 2 cột chứa các ô vật phẩm
+				local grid = Instance.new("Frame")
+				grid.Size = UDim2.new(1, 0, 0, 0)
+				grid.BackgroundTransparency = 1
+				grid.AutomaticSize = Enum.AutomaticSize.Y
+				grid.Parent = wrap
+
+				local gLayout = Instance.new("UIGridLayout", grid)
+				gLayout.CellSize = UDim2.new(0.485, 0, 0, 28)
+				gLayout.CellPadding = UDim2.new(0.03, 0, 0, 5)
+				gLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+				local cellUpdaters = {}
+
+				for idx, itemName in ipairs(itemList) do
+					local cell = Instance.new("TextButton")
+					cell.LayoutOrder = idx
+					cell.Font = Enum.Font.GothamBold
+					cell.TextSize = 10
+					cell.TextTruncate = Enum.TextTruncate.AtEnd
+					cell.Parent = grid
+					Instance.new("UICorner", cell).CornerRadius = UDim.new(0, 4)
+
+					local cellStroke = Instance.new("UIStroke", cell)
+					cellStroke.Thickness = 1
+
+					local function refreshCell()
+						local allowed = stateMap[itemName] == true
+						if allowed then
+							cell.BackgroundColor3 = Color3.fromRGB(28, 70, 38)
+							cell.TextColor3 = Color3.fromRGB(165, 255, 180)
+							cell.Text = "✓ " .. itemName
+							cellStroke.Color = Color3.fromRGB(75, 190, 95)
+						else
+							cell.BackgroundColor3 = Color3.fromRGB(68, 28, 28)
+							cell.TextColor3 = Color3.fromRGB(255, 165, 165)
+							cell.Text = "✕ " .. itemName
+							cellStroke.Color = Color3.fromRGB(185, 70, 70)
+						end
+					end
+
+					refreshCell()
+					table.insert(cellUpdaters, refreshCell)
+
+					cell.MouseButton1Click:Connect(function()
+						stateMap[itemName] = not (stateMap[itemName] == true)
+						refreshCell()
+					end)
+				end
+
+				btnAll.MouseButton1Click:Connect(function()
+					for _, name in ipairs(itemList) do
+						stateMap[name] = true
+					end
+					for _, fn in ipairs(cellUpdaters) do fn() end
+				end)
+
+				btnNone.MouseButton1Click:Connect(function()
+					for _, name in ipairs(itemList) do
+						stateMap[name] = false
+					end
+					for _, fn in ipairs(cellUpdaters) do fn() end
+				end)
+
+				return wrap
+			end
+
 			function Section:AddSlider(text, min, max, defaultOrCb, maybeCb)
 				local default = min
 				local callback = nil
@@ -2535,8 +2685,8 @@ function Library:CreateWindow(title)
 	end)
 
 	task.defer(function()
-		if tabEntries[1] and tabEntries[1].selectFn then
-			tabEntries[1].selectFn()
+		if tabOrderList[1] then
+			firesignal(tabOrderList[1].MouseButton1Click)
 		end
 	end)
 
@@ -2552,7 +2702,11 @@ flyPad.Size = UDim2.fromOffset(60, 124)
 flyPad.Position = UDim2.new(1, -70, 1, -132)
 flyPad.BackgroundTransparency = 1
 flyPad.Visible = false
-attachGuiSafely(flyPad)
+flyPad.Parent = CoreGui.Parent and CoreGui or PlayerGui
+pcall(function() flyPad.Parent = CoreGui end)
+if flyPad.Parent ~= CoreGui then
+	flyPad.Parent = PlayerGui
+end
 
 local function holdBtn(yOff, text, onState)
 	local b = Instance.new("TextButton")
@@ -2657,15 +2811,12 @@ do
 	coinStatusLbl = sChest:AddLabel(coinStatusText)
 
 	local sSurv = TabMain:AddSection("SINH TỒN & TRỒNG CÂY")
-	sSurv:AddToggle("God Mode", CFG.GodMode, function(v)
-		CFG.GodMode = v
-		if v then
-			startGodMode()
-		else
-			stopGodMode()
+	sSurv:AddToggle("🛡️ God Mode (Bất tử / Khóa máu)", CFG.GodMode, function(v)
+		setGodMode(v)
+		if Win and Win.Notify then
+			Win:Notify("🛡️ God Mode", v and "Đã bật God Mode (Bất tử)" or "Đã tắt God Mode", 3)
 		end
 	end)
-	godHPLbl = sSurv:AddLabel(godHPText)
 
 	sSurv:AddToggle("Auto Eat Carrot", CFG.AutoEat, function(v)
 		CFG.AutoEat = v
@@ -2767,6 +2918,8 @@ do
 	sFire:AddButton("🪵 Dồn nhiên liệu → Lửa ngay", function()
 		task.spawn(function() dumpFuelToFire() end)
 	end)
+	-- Bảng chọn vật phẩm được phép / không cho phép TP về Lửa trại
+	sFire:AddItemFilterTable("🔥 Bảng chọn vật phẩm TP về Lửa trại", FUEL_EXACT, FireAllowedItems)
 
 	local sScrap = TabItems:AddSection("SCRAPPER")
 	sScrap:AddButton("📍 TP tới Scrapper", function()
@@ -2779,6 +2932,8 @@ do
 	sScrap:AddButton("⚙️ Dồn nguyên liệu → Scrapper ngay", function()
 		task.spawn(dumpScrapToScrapper)
 	end)
+	-- Bảng chọn vật phẩm được phép / không cho phép TP về Scrapper
+	sScrap:AddItemFilterTable("⚙️ Bảng chọn vật phẩm TP về Scrapper", SCRAPPER_ITEMS, ScrapAllowedItems)
 
 	local sPull = TabItems:AddSection("KÉO VẬT PHẨM VỀ NGƯỜI")
 	sPull:AddButton("🍎 Kéo thức ăn", function()
