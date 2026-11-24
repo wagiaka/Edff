@@ -1,8 +1,7 @@
 --========================================================
--- SUNSET UI + OLLIE 99 NIGHTS (UPDATED SCRAPPER, FUEL & LOOT FILTER)
--- Scrapper: Full Iron/Scrap List + Drop From Above
--- Campfire Fuel: Wide Continuous Scan + TP One-by-One
--- Chest Loot: Custom Whitelist + Multi-Copy Blueprints
+-- SUNSET UI + OLLIE 99 NIGHTS (FIXED SCRAPPER & ZERO-LAG CHEST LOOT)
+-- Scrapper: Strict Items-Only Exact Filter (No Buildings/Treehouses)
+-- Chest Loot: Event-Cached Zero-Lag Loop + Custom Whitelist
 --========================================================
 
 local Players      = game:GetService("Players")
@@ -71,7 +70,7 @@ local SCRAPPER_KEYS = {
 	"Scrapper", "Grinder", "Recycler", "Anvil",
 }
 
--- Phế liệu sắt & nguyên liệu nghiền Scrapper
+-- Chỉ tên chính xác của phế liệu sắt + gỗ/ghế (không khớp từ khóa con để tránh dính nhà)
 local SCRAP_EXACT = {
 	"Bolt", "Sheet Metal", "Tyre", "Tires & Engines",
 	"Metal Chair", "Chair", "Log",
@@ -79,28 +78,10 @@ local SCRAP_EXACT = {
 	"Broken Microwave", "Washing Machine", "Old Car Engine",
 	"UFO Junk", "UFO Component", "UFO Scrap",
 	"Cultist Experiment", "Cultist Prototype",
-	"Obsidiron Shard", "Obsidiron Ingot", "Obsidiron",
-}
-
-local SCRAP_KEYS = {
-	"Bolt", "Sheet Metal", "Tyre", "Tire", "Engine",
-	"Metal Chair", "Chair", "Log",
-	"Broken Fan", "Broken Radio", "Radio",
-	"Broken Microwave", "Microwave",
-	"Washing Machine", "Scrap", "Iron", "Metal",
-	"UFO Junk", "UFO Component", "UFO",
-	"Cultist Experiment", "Cultist Prototype",
-	"Obsidiron",
-}
-
-local SCRAP_ITEMS = {
-	"Bolt", "Sheet Metal", "Tyre", "Tires & Engines",
-	"Metal Chair", "Chair", "Log",
-	"Broken Fan", "Broken Radio", "Old Radio",
-	"Broken Microwave", "Washing Machine", "Old Car Engine",
-	"UFO Junk", "UFO Component", "Cultist Experiment", "Cultist Prototype",
 	"Obsidiron Shard", "Obsidiron Ingot",
 }
+
+local SCRAP_ITEMS = SCRAP_EXACT
 
 -- Nhiên liệu lửa trại (không gồm Log và Chair)
 local FUEL_EXACT = {
@@ -139,7 +120,6 @@ local CHEST_LOOT_WHITELIST = {
 	"Bandage", "Medkit",
 }
 
--- 2 loại bản vẽ có thể cầm/nhặt nhiều
 local STACKABLE_BLUEPRINTS = {
 	["crafting blueprint"] = true,
 	["defense blueprint"]  = true,
@@ -229,6 +209,26 @@ local function partOf(m)
 		return nil
 	end)
 	return ok and res or nil
+end
+
+local function isWorldArchitecture(obj)
+	if not obj or not obj.Parent then return true end
+	local mapFolder = Workspace:FindFirstChild("Map")
+	if mapFolder and obj:IsDescendantOf(mapFolder) then
+		return true
+	end
+	-- Nếu là Model quá lớn (nhà cây, lều, kiến trúc), không bao giờ coi là vật phẩm nhặt/nghiền
+	if obj:IsA("Model") then
+		local ok, _, sz = pcall(function() return obj:GetBoundingBox() end)
+		if ok and sz and (sz.X > 12 or sz.Y > 12 or sz.Z > 12) then
+			return true
+		end
+	elseif obj:IsA("BasePart") then
+		if obj.Anchored and (obj.Size.X > 10 or obj.Size.Y > 10 or obj.Size.Z > 10) then
+			return true
+		end
+	end
+	return false
 end
 
 local function getChestBounds(chest)
@@ -595,18 +595,20 @@ task.spawn(function()
 end)
 
 --========================================================
--- AUTO OPEN CHEST -> STRICTLY INSIDE CHEST BOUNDS + WHITELIST
+-- ZERO-LAG AUTO OPEN CHEST & LOOT (EVENT-CACHED, NO WORKSPACE SCAN)
 --========================================================
 
 local chestLootStatusText = "Chờ bật tự động mở & nhặt rương..."
 local chestLootStatusLbl  = nil
 
 local cachedChests    = {}
+local cachedAmmo      = {}
+local openedChests    = setmetatable({}, { __mode = "k" })
 local lootedItems     = setmetatable({}, { __mode = "k" })
 local fireSentItems   = setmetatable({}, { __mode = "k" })
 local claimedAmmo     = setmetatable({}, { __mode = "k" })
 
-local STEP_WAIT_SECONDS = 0.08
+local STEP_WAIT_SECONDS = 0.35
 
 local totalChestsOpened  = 0
 local totalItemsLooted   = 0
@@ -624,10 +626,20 @@ local function isChestObject(o)
 	return (o:IsA("Model") or o:IsA("BasePart")) and hasKey(o.Name, CHEST_KEYS)
 end
 
-local chestCacheInitialized = false
-local function initChestCache()
-	if chestCacheInitialized then return end
-	chestCacheInitialized = true
+local function isAmmoObject(obj)
+	if not obj then return false end
+	local okName, name = pcall(function() return obj.Name end)
+	if not okName or type(name) ~= "string" then return false end
+	if hasKey(name, IGNORE_LOOT_KEYS) or hasKey(name, CHEST_KEYS) or hasKey(name, COIN_KEYS) then
+		return false
+	end
+	return hasKey(name, AMMO_KEYS)
+end
+
+local itemsCacheInitialized = false
+local function initItemsAndChestCache()
+	if itemsCacheInitialized then return end
+	itemsCacheInitialized = true
 
 	local itemsFolder = Workspace:FindFirstChild("Items")
 	local targetRoot  = itemsFolder or Workspace
@@ -638,18 +650,24 @@ local function initChestCache()
 			local o = all[i]
 			if isChestObject(o) then
 				cachedChests[o] = true
+			elseif isAmmoObject(o) then
+				cachedAmmo[o] = true
 			end
+			if i % 600 == 0 then task.wait() end
 		end
 	end)
 
 	targetRoot.DescendantAdded:Connect(function(o)
 		if isChestObject(o) then
 			cachedChests[o] = true
+		elseif isAmmoObject(o) then
+			cachedAmmo[o] = true
 		end
 	end)
 
 	targetRoot.DescendantRemoving:Connect(function(o)
 		cachedChests[o] = nil
+		cachedAmmo[o] = nil
 	end)
 end
 
@@ -721,48 +739,21 @@ local function tpItemToCampfire(item, idx)
 	return moved
 end
 
-local function isAmmoObject(obj)
-	if not obj then return false end
-	local okName, name = pcall(function() return obj.Name end)
-	if not okName or type(name) ~= "string" then return false end
-	if hasKey(name, IGNORE_LOOT_KEYS) or hasKey(name, CHEST_KEYS) or hasKey(name, COIN_KEYS) then
-		return false
-	end
-	return hasKey(name, AMMO_KEYS)
-end
-
-local function collectAllAmmoFast()
+local function collectCachedAmmoBatch()
 	if not ConsumeRF then return 0 end
-	local found, seen = {}, {}
-	local function tryAdd(o)
-		if not o or seen[o] or claimedAmmo[o] then return end
-		if isAmmoObject(o) then
-			seen[o] = true
-			table.insert(found, o)
-		end
-	end
-
-	if getnilinstances then
-		local ok, nilList = pcall(getnilinstances)
-		if ok and nilList then
-			for _, o in ipairs(nilList) do tryAdd(o) end
-		end
-	end
-
-	local itemsFolder = Workspace:FindFirstChild("Items")
-	local scanRoot = itemsFolder or Workspace
-	for _, o in ipairs(scanRoot:GetDescendants()) do
-		tryAdd(o)
-	end
-
 	local claimed = 0
-	for _, ammoObj in ipairs(found) do
-		if not CFG.AutoChestAndLoot then break end
-		local ok = pcall(ConsumeRF.InvokeServer, ConsumeRF, ammoObj)
-		if ok then
-			claimedAmmo[ammoObj] = true
-			claimed += 1
-			totalAmmoCollected += 1
+	for ammoObj, _ in pairs(cachedAmmo) do
+		if not CFG.AutoChestAndLoot or claimed >= 8 then break end
+		if ammoObj and ammoObj.Parent and not claimedAmmo[ammoObj] then
+			local ok = pcall(ConsumeRF.InvokeServer, ConsumeRF, ammoObj)
+			if ok then
+				claimedAmmo[ammoObj] = true
+				cachedAmmo[ammoObj] = nil
+				claimed += 1
+				totalAmmoCollected += 1
+			end
+		else
+			cachedAmmo[ammoObj] = nil
 		end
 	end
 	return claimed
@@ -773,6 +764,7 @@ local function isValidChestLoot(obj, targetChest)
 	if cachedChests[obj] or obj == targetChest or obj:IsDescendantOf(targetChest) then
 		return false
 	end
+	if isWorldArchitecture(obj) then return false end
 
 	local ch = Player.Character
 	if ch and obj:IsDescendantOf(ch) then return false end
@@ -825,18 +817,18 @@ local function tryTakeIntoBag(item)
 	local ok = pcall(HotbarItemRF.InvokeServer, HotbarItemRF, item)
 	if not ok then return false end
 
+	local afterInv = inv and #inv:GetChildren() or 0
+	local afterBag = bag and #bag:GetChildren() or 0
+
 	if isStackableBlueprint(item.Name) then
 		return (afterInv > beforeInv) or (afterBag > beforeBag) or (item.Parent == Player.Character) or (not item.Parent)
 	end
 
 	local nowInInv = (inv and item.Parent == inv) or (bag and item.Parent == bag) or (item.Parent == Player.Character)
-	local afterInv = inv and #inv:GetChildren() or 0
-	local afterBag = bag and #bag:GetChildren() or 0
-
 	return nowInInv or (afterInv > beforeInv) or (afterBag > beforeBag) or (not item.Parent)
 end
 
-local function processChestLootHighSpeed(chest)
+local function processChestLootSmooth(chest)
 	local items = scanLootInsideChest(chest)
 	if #items == 0 then return 0, 0 end
 
@@ -874,16 +866,15 @@ local function processChestLootHighSpeed(chest)
 	return grabbed, toFire
 end
 
-local function processNextChestStepFast()
+local function processNextChestStepSmooth()
 	if not OpenChestRE then
 		updateChestLootStatus("❌ Thiếu remote RequestOpenItemChest")
 		return
 	end
 
-	initChestCache()
+	initItemsAndChestCache()
 
 	local targetChest = nil
-	local targetPos   = nil
 	local r = root()
 	local rPos = r and r.Position
 	local bestDist = math.huge
@@ -893,10 +884,10 @@ local function processNextChestStepFast()
 			local p = partOf(chest)
 			if p then
 				local d = rPos and (p.Position - rPos).Magnitude or 0
-				if d < bestDist then
-					bestDist = d
+				local priorityPenalty = openedChests[chest] and 5000 or 0
+				if (d + priorityPenalty) < bestDist then
+					bestDist = d + priorityPenalty
 					targetChest = chest
-					targetPos = p.Position
 				end
 			end
 		else
@@ -904,8 +895,8 @@ local function processNextChestStepFast()
 		end
 	end
 
-	if not targetChest or not targetPos then
-		local ammoGot = collectAllAmmoFast()
+	if not targetChest then
+		local ammoGot = collectCachedAmmoBatch()
 		updateChestLootStatus(
 			string.format("⚡ Nhặt:%d | →Lửa:%d | Đạn:%d (+%d)",
 				totalItemsLooted, totalSentToFire, totalAmmoCollected, ammoGot)
@@ -913,14 +904,14 @@ local function processNextChestStepFast()
 		return
 	end
 
-	pcall(OpenChestRE.FireServer, OpenChestRE, targetChest)
-
-	local grabbed, toFire = processChestLootHighSpeed(targetChest)
-	local ammoGot = collectAllAmmoFast()
-
-	if grabbed > 0 or toFire > 0 or ammoGot > 0 then
+	if not openedChests[targetChest] then
+		pcall(OpenChestRE.FireServer, OpenChestRE, targetChest)
+		openedChests[targetChest] = true
 		totalChestsOpened += 1
 	end
+
+	local grabbed, toFire = processChestLootSmooth(targetChest)
+	local ammoGot = collectCachedAmmoBatch()
 
 	updateChestLootStatus(
 		string.format("⚡ Rương:%d | Nhặt:%d (+%d) | →Lửa:%d (+%d) | Đạn:%d",
@@ -931,10 +922,10 @@ end
 task.spawn(function()
 	while true do
 		if CFG.AutoChestAndLoot then
-			pcall(processNextChestStepFast)
+			pcall(processNextChestStepSmooth)
 			task.wait(STEP_WAIT_SECONDS)
 		else
-			task.wait(0.25)
+			task.wait(0.4)
 		end
 	end
 end)
@@ -1001,17 +992,6 @@ local function collectAllCoinsOnce()
 			table.insert(toCollect, coin)
 		else
 			cachedCoins[coin] = nil
-		end
-	end
-
-	if getnilinstances then
-		local ok, nilList = pcall(getnilinstances)
-		if ok and nilList then
-			for _, obj in ipairs(nilList) do
-				if isCoinObject(obj) then
-					table.insert(toCollect, obj)
-				end
-			end
 		end
 	end
 
@@ -1583,7 +1563,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- TP, PULL, WIDE ONE-BY-ONE FIRE FUEL & OVERHEAD SCRAPPER TP
+-- TP, PULL, WIDE ONE-BY-ONE FIRE FUEL & STRICT ITEMS-ONLY SCRAPPER
 --========================================================
 
 local function tpTo(m)
@@ -1617,15 +1597,12 @@ local function pullAllExact(nameList)
 	local ch = Player.Character
 	local found = {}
 	local itemsFolder = Workspace:FindFirstChild("Items")
-	local searchList  = itemsFolder and itemsFolder:GetDescendants() or Workspace:GetDescendants()
+	local searchList  = itemsFolder and itemsFolder:GetChildren() or Workspace:GetChildren()
 
 	for _, o in ipairs(searchList) do
-		local okSkip = pcall(function()
-			if ch and o:IsDescendantOf(ch) then return true end
-			if Players:GetPlayerFromCharacter(o) then return true end
-			return false
-		end)
-		if okSkip then continue end
+		if (ch and o:IsDescendantOf(ch)) or Players:GetPlayerFromCharacter(o) or isWorldArchitecture(o) then
+			continue
+		end
 
 		local okName, oName = pcall(function() return o.Name end)
 		if okName and (o:IsA("Model") or o:IsA("BasePart")) and matchesExact(oName, nameList) then
@@ -1678,14 +1655,17 @@ local function dumpFuelToFire()
 		end
 
 		local ch = Player.Character
-		local allObjs = Workspace:GetDescendants()
+		local itemsFolder = Workspace:FindFirstChild("Items")
+		local scanList = itemsFolder and itemsFolder:GetChildren() or Workspace:GetChildren()
 		local count = 0
 
-		for i = 1, #allObjs do
+		for i = 1, #scanList do
 			if not CFG.AutoDrop then break end
-			local o = allObjs[i]
+			local o = scanList[i]
 			if o and o.Parent and (o:IsA("Model") or o:IsA("BasePart")) then
-				local skip = (ch and o:IsDescendantOf(ch)) or Players:GetPlayerFromCharacter(o) ~= nil
+				local skip = (ch and o:IsDescendantOf(ch))
+					or Players:GetPlayerFromCharacter(o) ~= nil
+					or isWorldArchitecture(o)
 				if not skip then
 					local okN, oName = pcall(function() return o.Name end)
 					if okN and matchesExact(oName, FUEL_EXACT) then
@@ -1693,7 +1673,7 @@ local function dumpFuelToFire()
 						if p and (p.Position - fp.Position).Magnitude > 14 then
 							local dropPos = fp.Position + Vector3.new(
 								math.random(-20, 20) / 10,
-								10 + (count % 5) * 0.8,
+								9 + (count % 5) * 0.6,
 								math.random(-20, 20) / 10
 							)
 							if moveItemToCFrame(o, CFrame.new(dropPos)) then
@@ -1706,11 +1686,10 @@ local function dumpFuelToFire()
 					end
 				end
 			end
-			if i % 900 == 0 then task.wait() end
 		end
 
 		if count == 0 then
-			updateFireStatus(string.format("🔥 Quét toàn map liên tục · Tổng: %d", totalFuelMoved))
+			updateFireStatus(string.format("🔥 Quét liên tục · Tổng: %d", totalFuelMoved))
 		end
 		return count
 	end)
@@ -1728,14 +1707,14 @@ task.spawn(function()
 	while true do
 		if CFG.AutoDrop then
 			pcall(dumpFuelToFire)
-			task.wait(0.05)
+			task.wait(0.1)
 		else
-			task.wait(0.25)
+			task.wait(0.3)
 		end
 	end
 end)
 
--- FULL-MAP SCRAPPER TP (IRON SCRAP + DROP FROM ABOVE)
+-- ITEMS-ONLY EXACT SCRAPPER TP (NO BUILDINGS, DROP FROM ABOVE)
 local scrapStatusText = "Chờ bật auto TP Scrapper..."
 local scrapStatusLbl  = nil
 local isMovingScrap   = false
@@ -1748,12 +1727,23 @@ local function updateScrapStatus(txt)
 	end
 end
 
-local function isScrapCandidateName(name)
-	if type(name) ~= "string" then return false end
+local function isValidScrapItem(obj)
+	if not obj or not obj.Parent then return false end
+	if not (obj:IsA("Model") or obj:IsA("BasePart")) then return false end
+	if isWorldArchitecture(obj) then return false end
+
+	local ch = Player.Character
+	if (ch and obj:IsDescendantOf(ch)) or Players:GetPlayerFromCharacter(obj) then
+		return false
+	end
+
+	local okN, name = pcall(function() return obj.Name end)
+	if not okN or type(name) ~= "string" then return false end
 	if hasKey(name, SCRAPPER_KEYS) or hasKey(name, { "Campfire", "MainFire", "Tree", "Sapling" }) then
 		return false
 	end
-	return matchesExact(name, SCRAP_EXACT) or hasKey(name, SCRAP_KEYS)
+
+	return matchesExact(name, SCRAP_EXACT)
 end
 
 local function sendScrapToScrapper()
@@ -1767,41 +1757,33 @@ local function sendScrapToScrapper()
 			return 0
 		end
 
-		local ch = Player.Character
-		local allObjs = Workspace:GetDescendants()
+		local itemsFolder = Workspace:FindFirstChild("Items")
+		local scanList = itemsFolder and itemsFolder:GetChildren() or Workspace:GetChildren()
 		local count = 0
 
-		for i = 1, #allObjs do
+		for i = 1, #scanList do
 			if not CFG.AutoScrapper then break end
-			local o = allObjs[i]
-			if o and o.Parent and (o:IsA("Model") or o:IsA("BasePart")) then
-				local skip = (ch and o:IsDescendantOf(ch)) or Players:GetPlayerFromCharacter(o) ~= nil
-				if not skip then
-					local okN, oName = pcall(function() return o.Name end)
-					if okN and isScrapCandidateName(oName) then
-						local p = partOf(o)
-						if p and (p.Position - sp.Position).Magnitude > 14 then
-							-- Thả từ trên cao rớt xuống vị trí Scrapper
-							local dropCF = CFrame.new(sp.Position + Vector3.new(
-								math.random(-15, 15) / 10,
-								15 + (count % 5) * 1.2,
-								math.random(-15, 15) / 10
-							))
-							if moveItemToCFrame(o, dropCF) then
-								count += 1
-								totalScrapMoved += 1
-								updateScrapStatus(string.format("⚙️ Rớt %s xuống Scrapper (Tổng: %d)", tostring(oName), totalScrapMoved))
-								task.wait(0.05)
-							end
-						end
+			local o = scanList[i]
+			if isValidScrapItem(o) then
+				local p = partOf(o)
+				if p and (p.Position - sp.Position).Magnitude > 11 then
+					local dropCF = CFrame.new(sp.Position + Vector3.new(
+						math.random(-12, 12) / 10,
+						8 + (count % 4) * 0.7,
+						math.random(-12, 12) / 10
+					))
+					if moveItemToCFrame(o, dropCF) then
+						count += 1
+						totalScrapMoved += 1
+						updateScrapStatus(string.format("⚙️ Rớt %s xuống Scrapper (Tổng: %d)", o.Name, totalScrapMoved))
+						task.wait(0.05)
 					end
 				end
 			end
-			if i % 900 == 0 then task.wait() end
 		end
 
 		if count == 0 then
-			updateScrapStatus(string.format("⚙️ Quét toàn map · Đã rớt: %d", totalScrapMoved))
+			updateScrapStatus(string.format("⚙️ Đang quét vật phẩm · Đã rớt: %d", totalScrapMoved))
 		end
 		return count
 	end)
@@ -1819,9 +1801,9 @@ task.spawn(function()
 	while true do
 		if CFG.AutoScrapper then
 			pcall(sendScrapToScrapper)
-			task.wait(0.05)
+			task.wait(0.1)
 		else
-			task.wait(0.25)
+			task.wait(0.3)
 		end
 	end
 end)
@@ -2409,7 +2391,7 @@ do
 	sCombat:AddSlider("Delay (x10ms)", 5, 60, math.floor(CFG.Delay * 100), function(v) CFG.Delay = v / 100 end)
 
 	local sChest = TabMain:AddSection("RƯƠNG, ĐẠN & ĐỒNG XU")
-	sChest:AddToggle("Auto Rương Tốc Độ Cao", CFG.AutoChestAndLoot, function(v)
+	sChest:AddToggle("Auto Rương & Nhặt Đồ (Mượt)", CFG.AutoChestAndLoot, function(v)
 		CFG.AutoChestAndLoot = v
 		if not v then
 			updateChestLootStatus(
@@ -2540,7 +2522,7 @@ do
 		task.spawn(dumpFuelToFire)
 	end)
 
-	local sScrap = TabItems:AddSection("SCRAPPER (PHẾ LIỆU SẮT · RỚT TỪ TRÊN)")
+	local sScrap = TabItems:AddSection("SCRAPPER (CHỈ VẬT PHẨM · RỚT TỪ TRÊN)")
 	sScrap:AddButton("⚙️ TP Scrapper", tpScrapper)
 	sScrap:AddToggle("Auto TP phế liệu → Scrapper (Rớt trên)", CFG.AutoScrapper, function(v)
 		CFG.AutoScrapper = v
@@ -2601,5 +2583,5 @@ do
 end
 
 print("========================================")
-print(" SUNSET UI + 99 NIGHTS UPDATED LOADED ✓")
+print(" SUNSET UI + 99 NIGHTS OPTIMIZED LOADED ✓")
 print("========================================")
