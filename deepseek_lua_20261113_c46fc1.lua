@@ -1,9 +1,7 @@
 --========================================================
 -- SUNSET UI + OLLIE 99 NIGHTS (COMPLETE & OPTIMIZED)
--- God Mode | Custom Item Filter Tables for Fire & Scrapper
--- TP Auto Chop (Exact Tree Name Filter + Anti-Lose Axe Fix)
--- Independent Kill Aura + Conflict Warning | Auto Rescue Children
--- Cached Chest (multi-open, 1 item/chest, filter & beside-chest) + Ammo + Coins
+-- TP Auto Chop + Independent Kill Aura | Auto Rescue Children
+-- Cached Chest + Ammo + Coins | Zero-Lag Mobile Ready
 --========================================================
 
 local Players      = game:GetService("Players")
@@ -34,30 +32,24 @@ end
 -- REMOTES & GAME DATA
 --========================================================
 
-local Remotes          = RS:WaitForChild("RemoteEvents", 10)
-local EquipRE          = Remotes and Remotes:FindFirstChild("EquipItemHandle")
-local UnequipRE        = Remotes and Remotes:FindFirstChild("UnequipItemHandle")
-local DamageRF         = Remotes and Remotes:FindFirstChild("ToolDamageObject")
-local MapRE            = Remotes and Remotes:FindFirstChild("MapCellsDiscovered")
-local DragRE           = Remotes and Remotes:FindFirstChild("RequestStartDraggingItem")
-local StopDragRE       = Remotes and Remotes:FindFirstChild("StopDraggingItem")
-local HitSoundRE       = Remotes and Remotes:FindFirstChild("PlayEnemyHitSound")
-local ReplicateSoundRE = Remotes and Remotes:FindFirstChild("RequestReplicateSound")
-local PlantRE          = Remotes and Remotes:FindFirstChild("RequestPlantItem")
-local ConsumeRF        = Remotes and Remotes:FindFirstChild("RequestConsumeItem")
-local OpenChestRE      = Remotes and Remotes:FindFirstChild("RequestOpenItemChest")
-local CollectCoinRF    = Remotes and Remotes:FindFirstChild("RequestCollectCoints")
-local HotbarItemRF     = Remotes and Remotes:FindFirstChild("RequestHotbarItem")
-local BagStoreRF       = Remotes and Remotes:FindFirstChild("RequestBagStoreItem")
-local BagDropRE        = Remotes and Remotes:FindFirstChild("RequestBagDropItem")
+local Remotes       = RS:WaitForChild("RemoteEvents", 10)
+local EquipRE       = Remotes and Remotes:FindFirstChild("EquipItemHandle")
+local UnequipRE     = Remotes and Remotes:FindFirstChild("UnequipItemHandle")
+local DamageRF      = Remotes and Remotes:FindFirstChild("ToolDamageObject")
+local MapRE         = Remotes and Remotes:FindFirstChild("MapCellsDiscovered")
+local DragRE        = Remotes and Remotes:FindFirstChild("RequestStartDraggingItem")
+local StopDragRE    = Remotes and Remotes:FindFirstChild("StopDraggingItem")
+local HitSoundRE    = Remotes and Remotes:FindFirstChild("PlayEnemyHitSound")
+local PlantRE       = Remotes and Remotes:FindFirstChild("RequestPlantItem")
+local ConsumeRF     = Remotes and Remotes:FindFirstChild("RequestConsumeItem")
+local OpenChestRE   = Remotes and Remotes:FindFirstChild("RequestOpenItemChest")
+local CollectCoinRF = Remotes and Remotes:FindFirstChild("RequestCollectCoints")
+local HotbarItemRF  = Remotes and Remotes:FindFirstChild("RequestHotbarItem")
+local BagStoreRF    = Remotes and Remotes:FindFirstChild("RequestBagStoreItem")
+local BagDropRE     = Remotes and Remotes:FindFirstChild("RequestBagDropItem")
 
 local AXES = {
 	"Old Axe","Good Axe","Ice Axe","Strong Axe","Chainsaw","Admin Axe",
-}
-local HEAVY_AXES = {
-	["Strong Axe"] = true,
-	["Chainsaw"]   = true,
-	["Admin Axe"]  = true,
 }
 local MELEE_WEAPONS = {
 	"Spear","Honey Spear","Morningstar","Katana","Laser Sword","Ice Sword",
@@ -77,10 +69,6 @@ local FUEL_EXACT = {
 	"Log","Chair","Biofuel","Coal",
 	"Purple Fur Tuft","Fuel Canister","Oil Barrel",
 }
-local SCRAPPER_ITEMS = {
-	"Bolt","Sheet Metal","Broken Fan","Broken Radio",
-	"Broken Microwave","Washing Machine","Tires & Engines",
-}
 local CHEST_KEYS = { "Chest", "Crate", "Supply", "Loot" }
 local COIN_KEYS  = { "Coin" }
 local AMMO_KEYS  = { "Ammo", "Bullet", "Shell", "Arrow", "Dart", "Rocket", "Cartridge" }
@@ -90,7 +78,6 @@ local IGNORE_LOOT_KEYS = {
 }
 
 local CFG = {
-	GodMode=false,
 	Speed=false,            WalkSpeed=40,
 	Jump=false,             JumpPower=90,
 	Fly=false,              FlySpeed=60,
@@ -98,7 +85,6 @@ local CFG = {
 	KillAura=false,         KillRadius=150,
 	AutoChop=false,         ChopRadius=130,
 	AutoDrop=false,
-	AutoScrap=false,
 	AutoEat=false,
 	AutoChestAndLoot=false,
 	AutoCollectCoins=false,
@@ -108,17 +94,6 @@ local CFG = {
 	FixLag=false,
 	Delay=0.35,
 }
-
--- Bảng trạng thái cho phép/chặn TP của từng vật phẩm
-local FireAllowedItems = {}
-for _, itemName in ipairs(FUEL_EXACT) do
-	FireAllowedItems[itemName] = true
-end
-
-local ScrapAllowedItems = {}
-for _, itemName in ipairs(SCRAPPER_ITEMS) do
-	ScrapAllowedItems[itemName] = true
-end
 
 local MAX_KILL_PER_CYCLE = 6
 local TOOL_SUFFIX = "11960515286"
@@ -152,21 +127,11 @@ local function hum()
 	return c and c:FindFirstChildOfClass("Humanoid")
 end
 
-local function getHeadPart()
-	local c = Player.Character
-	return c and (c:FindFirstChild("Head") or c:FindFirstChild("HumanoidRootPart"))
-end
-
 local function partOf(m)
 	if not m then return nil end
 	if m:IsA("BasePart") then return m end
 	if m:IsA("Model") then
 		if m.PrimaryPart then return m.PrimaryPart end
-		for _, child in ipairs(m:GetDescendants()) do
-			if child:IsA("BasePart") and hasKey(child.Name, { "Trunk", "Wood", "Log", "Hitbox", "Stem" }) then
-				return child
-			end
-		end
 		local hrp = m:FindFirstChild("HumanoidRootPart")
 		if hrp then return hrp end
 		return m:FindFirstChildWhichIsA("BasePart", true)
@@ -202,9 +167,7 @@ end
 
 local function getChopTool()
 	local inv, char = Player:FindFirstChild("Inventory"), Player.Character
-	local priorityAxes = { "Admin Axe", "Chainsaw", "Strong Axe", "Ice Axe", "Good Axe", "Old Axe" }
-	return findFromList(priorityAxes, inv, char)
-		or findFromList(AXES, inv, char)
+	return findFromList(AXES, inv, char)
 		or findFromList(MELEE_WEAPONS, inv, char)
 		or getFallbackTool(inv, char)
 end
@@ -263,108 +226,6 @@ local function getNilByName(name)
 	end
 	return out
 end
-
---========================================================
--- GOD MODE (CLIENT HEALTH LOCK & ANTI-DEATH)
---========================================================
-
-local godCharConns = {}
-
-local function clearGodConns()
-	for _, conn in ipairs(godCharConns) do
-		pcall(function() conn:Disconnect() end)
-	end
-	godCharConns = {}
-end
-
-local function bindGodModeToChar(char)
-	clearGodConns()
-	if not char then return end
-
-	local function hookHum(h)
-		if not h then return end
-		pcall(function()
-			h:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
-		end)
-
-		local c1 = h.HealthChanged:Connect(function(hp)
-			if CFG.GodMode and hp < h.MaxHealth then
-				pcall(function()
-					if h.MaxHealth <= 0 or h.MaxHealth == math.huge then
-						h.MaxHealth = 100
-					end
-					h.Health = h.MaxHealth
-				end)
-			end
-		end)
-
-		local c2 = h.StateChanged:Connect(function(_, newState)
-			if CFG.GodMode and newState == Enum.HumanoidStateType.Dead then
-				pcall(function()
-					h:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
-					h.Health = h.MaxHealth > 0 and h.MaxHealth or 100
-					h:ChangeState(Enum.HumanoidStateType.Running)
-				end)
-			end
-		end)
-
-		table.insert(godCharConns, c1)
-		table.insert(godCharConns, c2)
-	end
-
-	local existingHum = char:FindFirstChildOfClass("Humanoid")
-	if existingHum then
-		hookHum(existingHum)
-	end
-
-	local cAdd = char.ChildAdded:Connect(function(child)
-		if child:IsA("Humanoid") then
-			hookHum(child)
-		end
-	end)
-	table.insert(godCharConns, cAdd)
-end
-
-local function setGodMode(state)
-	CFG.GodMode = state
-	local c = Player.Character
-	local h = hum()
-	if state then
-		if c then bindGodModeToChar(c) end
-		if h then
-			pcall(function()
-				h:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
-				h.Health = h.MaxHealth > 0 and h.MaxHealth or 100
-			end)
-		end
-	else
-		clearGodConns()
-		if h then
-			pcall(function()
-				h:SetStateEnabled(Enum.HumanoidStateType.Dead, true)
-			end)
-		end
-	end
-end
-
-RunService.Heartbeat:Connect(function()
-	if not CFG.GodMode then return end
-	local c = Player.Character
-	if not c then return end
-	local h = c:FindFirstChildOfClass("Humanoid")
-	if h then
-		if h.MaxHealth <= 0 then h.MaxHealth = 100 end
-		if h.Health < h.MaxHealth then
-			h.Health = h.MaxHealth
-		end
-	end
-	-- Xóa ForceField hay trạng thái sát thương nếu có
-	for _, part in ipairs(c:GetChildren()) do
-		if part:IsA("BasePart") and part.Velocity.Y < -140 then
-			part.AssemblyLinearVelocity = Vector3.new(part.AssemblyLinearVelocity.X, -40, part.AssemblyLinearVelocity.Z)
-		end
-	end
-end)
 
 --========================================================
 -- EVENT-BASED CACHE: CHILDREN (NO WORKSPACE LAG)
@@ -559,7 +420,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- AUTO OPEN CHEST (MULTI-OPEN, 1 ITEM/CHEST, FILTERED) + AMMO SCAN
+-- AUTO OPEN CHEST -> LOOT AT CHEST POS + AUTO SCAN AMMO (2s)
 --========================================================
 
 local chestLootStatusText = "Chờ bật tự động mở & nhặt rương..."
@@ -573,14 +434,11 @@ local failedLootAt    = {}
 local claimedAmmo     = setmetatable({}, { __mode = "k" })
 local failedAmmoAt    = {}
 
-local CHEST_FAIL_COOLDOWN  = 5
-local LOOT_FAIL_COOLDOWN   = 35
-local AMMO_FAIL_COOLDOWN   = 15
-local CHEST_LOOT_RADIUS    = 12
-local CHEST_OPEN_DELAY     = 0.35
-local CHEST_CYCLE_WAIT     = 1
-local CHESTS_MIN_PER_CYCLE = 2
-local CHESTS_MAX_PER_CYCLE = 3
+local CHEST_FAIL_COOLDOWN = 45
+local LOOT_FAIL_COOLDOWN  = 35
+local AMMO_FAIL_COOLDOWN  = 15
+local CHEST_LOOT_RADIUS   = 12
+local STEP_WAIT_SECONDS   = 2
 
 local totalChestsOpened  = 0
 local totalItemsLooted   = 0
@@ -842,114 +700,33 @@ local function openSingleChest(chest)
 	return ok == true
 end
 
--- ===== BỘ LỌC VẬT PHẨM RƯƠNG =====
-local Filter = {}
-
-Filter.wanted = {}
-local CHEST_WANTED_LIST = {
-	"Bandage","Good Sack","Good Axe","Old Flashlight","Spear","Revolver","Fuel Canister",
-	"Leather Body","Rifle","Strong Flashlight","Defensive Blueprint Spikes",
-	"Iron Body","Strong Axe","Giant Sack","Medkit","Oil Barrel",
-	"Morningstar","Dynamite","Impact Grenade","Bear Trap","Ammo Crate Recipe Tablet","Cultist Gem",
-	"Chainsaw","Kunai","Thorn Armor","Throwing Knives",
-	"Raygun","Laser Sword","Laser Cannon","Alien Armor","Laser Fence Blueprint",
-	"Diamond","Diamonds",
-}
-for _, n in ipairs(CHEST_WANTED_LIST) do Filter.wanted[n] = true end
-for _, n in ipairs(AXES) do Filter.wanted[n] = true end
-for _, n in ipairs(MELEE_WEAPONS) do Filter.wanted[n] = true end
-for _, n in ipairs(SACK_NAMES) do Filter.wanted[n] = true end
-
-local function hasItemInBackpack(name)
-	local inv = Player:FindFirstChild("Inventory")
-	if inv and inv:FindFirstChild(name) then return true end
-	local ch = Player.Character
-	if ch and ch:FindFirstChild(name) then return true end
-	local bag = Player:FindFirstChild("ItemBag")
-	if bag and bag:FindFirstChild(name) then return true end
-	return false
-end
-
-local function setItemPosition(item, goalCF)
-	if item:IsA("Model") then
-		if not item.PrimaryPart then pcall(function() item.PrimaryPart = partOf(item) end) end
-		if item.PrimaryPart then
-			pcall(function() item:SetPrimaryPartCFrame(goalCF) end)
-		else
-			pcall(function() item:PivotTo(goalCF) end)
-		end
-	elseif item:IsA("BasePart") then
-		pcall(function() item.CFrame = goalCF end)
-	elseif item:IsA("Tool") then
-		local h = item:FindFirstChild("Handle")
-		if h then pcall(function() h.CFrame = goalCF end) end
+local function lootItemsAtChest(chest, chestPos)
+	local now = os.clock()
+	local items = scanLootAtChestPos(chestPos, chest, now)
+	if #items == 0 then
+		return 0, 0
 	end
-end
 
-local function moveItemTo(item, worldPos)
-	if not (DragRE and StopDragRE and item and item.Parent) then return false end
-	pcall(DragRE.FireServer, DragRE, item)
-	setItemPosition(item, CFrame.new(worldPos))
-	task.wait(0.05)
-	pcall(StopDragRE.FireServer, StopDragRE, item)
-	return true
-end
+	local grabbed, skipped = 0, 0
+	for i = 1, math.min(#items, 15) do
+		if not CFG.AutoChestAndLoot then break end
+		local item = items[i]
+		if isLootSkipped(item, os.clock()) then continue end
 
-local function moveItemBesideChest(item, chest)
-	local cp = partOf(chest)
-	if not cp then return false end
-	local a = math.random() * math.pi * 2
-	local pos = cp.Position + Vector3.new(math.cos(a) * 3.5, 2, math.sin(a) * 3.5)
-	return moveItemTo(item, pos)
-end
-
-local function lootOneItemAtChest(chest, chestPos)
-	local items = scanLootAtChestPos(chestPos, chest, os.clock())
-	if #items == 0 then return "empty" end
-
-	local result = "skip"
-	for _, item in ipairs(items) do
-		local name = item.Name
-
-		if not Filter.wanted[name] then
+		if tryLootSingleItem(item) then
 			lootedItems[item] = true
-
-		elseif hasItemInBackpack(name) then
-			lootedItems[item] = true
-			moveItemBesideChest(item, chest)
-			result = "dup"
-
+			grabbed += 1
+			totalItemsLooted += 1
 		else
-			if tryLootSingleItem(item) then
-				lootedItems[item] = true
-				totalItemsLooted += 1
-				return "picked"
-			else
-				failedLootAt[item] = os.clock()
-			end
+			failedLootAt[item] = os.clock()
+			skipped += 1
 		end
+		task.wait(0.06)
 	end
-	return result
+	return grabbed, skipped
 end
 
-local function getAvailableChests(now)
-	local r = root()
-	local rPos = r and r.Position
-	local list = {}
-	for chest in pairs(cachedChests) do
-		if not isChestSkipped(chest, now) then
-			local p = partOf(chest)
-			if p then
-				local d = rPos and (p.Position - rPos).Magnitude or 0
-				table.insert(list, { chest = chest, pos = p.Position, dist = d })
-			end
-		end
-	end
-	table.sort(list, function(a, b) return a.dist < b.dist end)
-	return list
-end
-
-local function processChestCycle()
+local function processNextChestStep()
 	if not OpenChestRE then
 		updateChestLootStatus("❌ Thiếu remote RequestOpenItemChest")
 		return
@@ -961,8 +738,28 @@ local function processChestCycle()
 
 	initChestCache()
 
-	local list = getAvailableChests(os.clock())
-	if #list == 0 then
+	local now = os.clock()
+	local targetChest = nil
+	local targetPos   = nil
+	local r = root()
+	local rPos = r and r.Position
+
+	local bestDist = math.huge
+	for chest, _ in pairs(cachedChests) do
+		if not isChestSkipped(chest, now) then
+			local p = partOf(chest)
+			if p then
+				local d = rPos and (p.Position - rPos).Magnitude or 0
+				if d < bestDist then
+					bestDist = d
+					targetChest = chest
+					targetPos = p.Position
+				end
+			end
+		end
+	end
+
+	if not targetChest or not targetPos then
 		local ammoGot = collectScannedAmmo()
 		updateChestLootStatus(
 			string.format("✅ Hết rương · Rương: %d | Đồ: %d | Đạn: %d (+%d)",
@@ -971,52 +768,49 @@ local function processChestCycle()
 		return
 	end
 
-	local want = math.random(CHESTS_MIN_PER_CYCLE, CHESTS_MAX_PER_CYCLE)
-	local opened, picked, toFire = 0, 0, 0
-
-	for i = 1, math.min(want, #list) do
-		if not CFG.AutoChestAndLoot then break end
-		local entry = list[i]
-		local chest = entry.chest
-
-		if chest.Parent and not openedChestDone[chest] then
-			updateChestLootStatus("📦 Đang mở: " .. tostring(chest.Name))
-
-			if openSingleChest(chest) then
-				task.wait(CHEST_OPEN_DELAY)
-				local p = partOf(chest)
-				local pos = (p and p.Position) or entry.pos
-
-				updateChestLootStatus("🎒 Đang xử lý đồ: " .. tostring(chest.Name))
-				local res = lootOneItemAtChest(chest, pos)
-
-				openedChestDone[chest] = true
-				totalChestsOpened += 1
-				opened += 1
-				if res == "picked" then
-					picked += 1
-				elseif res == "dup" then
-					toFire += 1
-				end
-			else
-				failedChestAt[chest] = os.clock()
-			end
-		end
+	updateChestLootStatus("📦 Đang mở: " .. tostring(targetChest.Name))
+	local openedOk = openSingleChest(targetChest)
+	if not openedOk or not targetChest.Parent then
+		failedChestAt[targetChest] = os.clock()
+		local ammoGot = collectScannedAmmo()
+		updateChestLootStatus(
+			string.format("⏭️ Bỏ qua rương lỗi (%s) · Đạn +%d", tostring(targetChest.Name), ammoGot)
+		)
+		return
 	end
 
+	task.wait(0.35)
+	if not CFG.AutoChestAndLoot then return end
+
+	local currentChestPart = partOf(targetChest)
+	local scanPos = currentChestPart and currentChestPart.Position or targetPos
+
+	updateChestLootStatus("🎒 Đang nhặt đồ & đạn: " .. tostring(targetChest.Name))
+	local grabbed, skipped = lootItemsAtChest(targetChest, scanPos)
 	local ammoGot = collectScannedAmmo()
-	updateChestLootStatus(
-		string.format("📦 Mở %d rương · Nhặt %d · Dời kế rương %d · Đạn +%d · Tổng: %d rương / %d đồ / %d đạn",
-			opened, picked, toFire, ammoGot,
-			totalChestsOpened, totalItemsLooted, totalAmmoCollected)
-	)
+
+	if grabbed > 0 or ammoGot > 0 or targetChest.Parent then
+		openedChestDone[targetChest] = true
+		totalChestsOpened += 1
+		updateChestLootStatus(
+			string.format("📦 #%d (%s) +%d đồ +%d đạn · Tổng: %d đồ / %d đạn",
+				totalChestsOpened, tostring(targetChest.Name), grabbed, ammoGot,
+				totalItemsLooted, totalAmmoCollected)
+		)
+	else
+		failedChestAt[targetChest] = os.clock()
+		updateChestLootStatus(
+			string.format("⏭️ Bỏ qua rương trống (%s) · Tổng: %d đồ / %d đạn",
+				tostring(targetChest.Name), totalItemsLooted, totalAmmoCollected)
+		)
+	end
 end
 
 task.spawn(function()
 	while true do
 		if CFG.AutoChestAndLoot then
-			pcall(processChestCycle)
-			task.wait(CHEST_CYCLE_WAIT)
+			pcall(processNextChestStep)
+			task.wait(STEP_WAIT_SECONDS)
 		else
 			task.wait(0.5)
 		end
@@ -1132,19 +926,11 @@ task.spawn(function()
 end)
 
 --========================================================
--- COUNTER, KILL AURA & TP AUTO CHOP (EXACT TREE NAMES + ANTI-LOSE AXE FIX)
+-- COUNTER, KILL AURA & TP AUTO CHOP (INDEPENDENT LOOPS)
 --========================================================
 
 local hitCounter = 0
-local lastEquippedChopTool = nil
-local isChoppingNow = false
-
-local function resetCounter()
-	hitCounter = 0
-	lastEquippedChopTool = nil
-	isChoppingNow = false
-end
-
+local function resetCounter() hitCounter = 0 end
 Workspace.ChildAdded:Connect(function(c)
 	if c.Name == "Map" then
 		resetCounter()
@@ -1163,78 +949,34 @@ local function nextId()
 	return hitCounter .. "_" .. TOOL_SUFFIX
 end
 
-local function fireWoodChopSound()
-	local head = getHeadPart()
-	if ReplicateSoundRE and head then
-		pcall(ReplicateSoundRE.FireServer, ReplicateSoundRE, "FireAllClients", "WoodChop", {
-			Instance = head,
-			Volume = 0.4,
-		})
-	end
-end
-
-local function isToolValid(tool)
-	if not tool or not tool.Parent then return false end
-	local inv = Player:FindFirstChild("Inventory")
-	local char = Player.Character
-	return (inv and tool:IsDescendantOf(inv)) or (char and tool:IsDescendantOf(char))
-end
-
-local function isToolEquippedOnChar(tool)
-	local char = Player.Character
-	return char and tool and tool.Parent == char
-end
-
 local function hitOnce(tool, target, p)
 	if not DamageRF or not target or not target.Parent or not p or not p.Parent then
 		return false
 	end
-	if not isToolValid(tool) then return false end
 	local ok = pcall(DamageRF.InvokeServer, DamageRF,
 		target, tool, nextId(), CFrame.new(p.Position), false)
-	if HitSoundRE and ok then
+	if HitSoundRE then
 		pcall(HitSoundRE.FireServer, HitSoundRE, "FireAllClients", target, tool)
 	end
 	return ok == true
 end
 
 local function equipToolSafe(tool)
-	if not (EquipRE and isToolValid(tool)) then return end
-	if isToolEquippedOnChar(tool) then return end
-	pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
-	task.wait(0.06)
+	if EquipRE and tool then
+		pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
+		task.wait(0.03)
+	end
 end
 
 local function unequipToolSafe(tool)
-	if not (UnequipRE and isToolValid(tool)) then return end
-	if not isToolEquippedOnChar(tool) then return end
-	pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
-	if lastEquippedChopTool == tool then
-		lastEquippedChopTool = nil
+	if UnequipRE and tool then
+		pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
+		task.wait(0.025)
 	end
-	task.wait(0.05)
-end
-
-local function equipChopToolOnce(tool)
-	if not (EquipRE and isToolValid(tool)) then return false end
-	if isToolEquippedOnChar(tool) then
-		lastEquippedChopTool = tool
-		return true
-	end
-	if lastEquippedChopTool ~= tool or not isToolEquippedOnChar(tool) then
-		pcall(EquipRE.FireServer, EquipRE, "FireAllClients", tool)
-		lastEquippedChopTool = tool
-		task.wait(0.08)
-	end
-	return isToolValid(tool)
 end
 
 local function swingBatch(tool, targets)
 	if not (EquipRE and UnequipRE and DamageRF) or #targets == 0 then return end
-	if not isToolValid(tool) then return end
-
-	local sharedWithChop = isChoppingNow and (lastEquippedChopTool == tool)
-
 	equipToolSafe(tool)
 	local limit = math.min(#targets, MAX_KILL_PER_CYCLE)
 	for i = 1, limit do
@@ -1248,10 +990,7 @@ local function swingBatch(tool, targets)
 		end
 		if i < limit then task.wait(0.05) end
 	end
-
-	if not sharedWithChop and not CFG.AutoChop then
-		unequipToolSafe(tool)
-	end
+	unequipToolSafe(tool)
 end
 
 local SCAN_FOLDERS = { "Characters","Enemies","Mobs","NPCs" }
@@ -1289,111 +1028,30 @@ local function getAnimals(r)
 end
 
 local skipTree = {}
+local TREE_KEYS = { "Tree","Pine","Oak","Birch","Fir" }
 
-local function findNilEquivalent(targetName, targetDebugId)
-	if not (targetName and targetDebugId and getnilinstances) then return nil end
-	local okList, nilList = pcall(getnilinstances)
-	if not okList or not nilList then return nil end
-
-	for _, inst in ipairs(nilList) do
-		local okN, n = pcall(function() return inst.Name end)
-		local okD, d = pcall(function() return inst:GetDebugId() end)
-		if okN and okD and n == targetName and d == targetDebugId then
-			return inst
-		end
-	end
-	return nil
+local function isValidTreeModel(o)
+	if not o or not o.Parent or not o:IsA("Model") then return false end
+	if not hasKey(o.Name, TREE_KEYS) then return false end
+	if hasKey(o.Name, { "Sapling", "Log", "Plank", "Scrap", "Chair" }) then return false end
+	return partOf(o) ~= nil
 end
 
-local function isTreeBroken(treeModel, treePart)
-	if not treeModel or not treeModel.Parent then return true end
-	if not treePart or not treePart.Parent then return true end
-
-	local hpAttr = treeModel:GetAttribute("Health") or treeModel:GetAttribute("HP")
-	if type(hpAttr) == "number" and hpAttr <= 0 then return true end
-
-	local hpVal = treeModel:FindFirstChild("Health", true) or treeModel:FindFirstChild("HP", true)
-	if hpVal and hpVal:IsA("ValueBase") and type(hpVal.Value) == "number" and hpVal.Value <= 0 then
-		return true
-	end
-
-	local h = treeModel:FindFirstChildWhichIsA("Humanoid", true)
-	if h and h.Health <= 0 then return true end
-
-	if treePart:IsA("BasePart") and not treePart.Anchored then
-		return true
-	end
-
-	return false
-end
-
-local function normalizeName(str)
-	if type(str) ~= "string" then return "" end
-	return string.lower(string.gsub(str, "%s+", ""))
-end
-
-local function isSmallTreeName(name)
-	local n = normalizeName(name)
-	return n == "smalltree" or string.find(n, "smalltree", 1, true) ~= nil
-end
-
-local function isBigTreeName(name)
-	local n = normalizeName(name)
-	return n == "treebig1" or n == "treebig2"
-		or string.find(n, "treebig1", 1, true) ~= nil
-		or string.find(n, "treebig2", 1, true) ~= nil
-end
-
-local function canChopBigTree(tool)
-	if not tool then return false end
-	return HEAVY_AXES[tool.Name] == true
-end
-
-local function classifyTree(treeModel)
-	if not treeModel or not treeModel.Parent or not treeModel:IsA("Model") then
-		return nil
-	end
-
-	local p = partOf(treeModel)
-	if not p or isTreeBroken(treeModel, p) then
-		return nil
-	end
-
-	if isSmallTreeName(treeModel.Name) then
-		return "normal"
-	end
-
-	if isBigTreeName(treeModel.Name) then
-		return "big"
-	end
-
-	return nil
-end
-
-local function getTrees(r, maxRadius, tool)
+local function getTrees(r, maxRadius)
 	local out = {}
 	local useLimit = type(maxRadius) == "number" and maxRadius > 0
 	local maxDSq = useLimit and (maxRadius * maxRadius) or math.huge
 	local rPos   = r.Position
 	local now    = os.clock()
-	local allowBig = canChopBigTree(tool)
 
 	local function tryAddTree(t)
 		if skipTree[t] and now < skipTree[t] then return end
-
-		local treeType = classifyTree(t)
-		if not treeType then
-			return
-		end
-		if treeType == "big" and not allowBig then
-			return
-		end
-
+		if not isValidTreeModel(t) then return end
 		local p = partOf(t); if not p then return end
 		local d = p.Position - rPos
 		local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
 		if dSq <= maxDSq then
-			table.insert(out, { m = t, p = p, dSq = dSq, treeType = treeType })
+			table.insert(out, { m = t, p = p, dSq = dSq })
 		end
 	end
 
@@ -1426,108 +1084,44 @@ local function getTrees(r, maxRadius, tool)
 	return out
 end
 
-local function spamChopDamageOnce(tool, treeModel, treePart, savedName, savedDebugId, fallbackPos)
-	if not DamageRF or not isToolValid(tool) then return false end
-
-	local actualTarget = (treeModel and treeModel.Parent)
-		and treeModel
-		or findNilEquivalent(savedName, savedDebugId)
-	if not actualTarget then return false end
-
-	local hitPos = (treePart and treePart.Parent) and treePart.Position or fallbackPos
-	local rr = root()
-	local hitCF
-	if rr and hitPos then
-		local lookPos = Vector3.new(hitPos.X, rr.Position.Y, hitPos.Z)
-		hitCF = CFrame.lookAt(hitPos, lookPos)
-	elseif hitPos then
-		hitCF = CFrame.new(hitPos)
-	else
-		hitCF = CFrame.new(0, 0, 0)
-	end
-
-	fireWoodChopSound()
-
-	local ok = pcall(DamageRF.InvokeServer, DamageRF,
-		actualTarget, tool, nextId(), hitCF, false)
-
-	if HitSoundRE and ok then
-		pcall(HitSoundRE.FireServer, HitSoundRE, "FireAllClients", actualTarget, tool)
-	end
-
-	return ok == true
-end
-
-local function tpToTreeAndChop(treeModel, treePart, initialTool)
+local function tpToTreeAndChop(treeModel, treePart, tool)
 	local r = root()
 	if not (r and treeModel and treeModel.Parent and treePart and treePart.Parent) then
 		return false
 	end
-	if not isToolValid(initialTool) then
-		return false
-	end
-
-	local savedName = treeModel.Name
-	local okDbg, savedDebugId = pcall(function() return treeModel:GetDebugId() end)
-	if not okDbg then savedDebugId = nil end
 
 	local targetPos = treePart.Position
-	r.CFrame = CFrame.lookAt(targetPos + Vector3.new(0, 2.5, -3), targetPos)
-	task.wait(0.08)
+	r.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, -3.5), targetPos)
+	task.wait(0.12)
 
-	isChoppingNow = true
-	local lockedTool = initialTool
-	if not equipChopToolOnce(lockedTool) then
-		isChoppingNow = false
-		return false
-	end
-
-	local swings = 0
-	local maxSwings = 45
-	local failedHits = 0
-	local spamWait = math.min(math.max(CFG.Delay or 0.06, 0.05), 0.12)
-
-	while CFG.AutoChop and not isTreeBroken(treeModel, treePart) and swings < maxSwings do
+	equipToolSafe(tool)
+	local anyHit = false
+	for _ = 1, 4 do
+		if not CFG.AutoChop or not treeModel.Parent or not treePart.Parent then
+			break
+		end
 		local rr = root()
-		if not rr then break end
-
-		if not isToolValid(lockedTool) then
-			local fallback = getChopTool()
-			if not isToolValid(fallback) then break end
-			lockedTool = fallback
-			equipChopToolOnce(lockedTool)
-		elseif not isToolEquippedOnChar(lockedTool) then
-			equipChopToolOnce(lockedTool)
-		end
-
-		local curTreePos = (treePart and treePart.Parent) and treePart.Position or targetPos
-		if (rr.Position - curTreePos).Magnitude > 7 then
-			rr.CFrame = CFrame.lookAt(curTreePos + Vector3.new(0, 2.5, -3), curTreePos)
-		end
-
-		local hitOk = spamChopDamageOnce(lockedTool, treeModel, treePart, savedName, savedDebugId, curTreePos)
-		if hitOk then
-			failedHits = 0
-		else
-			failedHits += 1
-			if failedHits >= 8 then
-				break
+		if rr then
+			if (rr.Position - targetPos).Magnitude > 14 then
+				rr.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, -3.5), targetPos)
+			end
+			if hitOnce(tool, treeModel, treePart) then
+				anyHit = true
 			end
 		end
-
-		swings += 1
-		task.wait(spamWait)
+		task.wait(math.max(CFG.Delay, 0.12))
 	end
+	unequipToolSafe(tool)
 
-	isChoppingNow = false
-	return isTreeBroken(treeModel, treePart)
+	return anyHit or (not treeModel.Parent)
 end
 
+-- Luồng riêng cho Kill Aura
 task.spawn(function()
 	while true do
 		if CFG.KillAura then
 			local r, tool = root(), getKillTool()
-			if r and isToolValid(tool) then
+			if r and tool then
 				local targets = getAnimals(r)
 				if #targets > 0 then
 					pcall(swingBatch, tool, targets)
@@ -1540,33 +1134,27 @@ task.spawn(function()
 	end
 end)
 
+-- Luồng riêng cho TP Auto Chop
 task.spawn(function()
 	while true do
 		if CFG.AutoChop then
 			local r, tool = root(), getChopTool()
-			if r and isToolValid(tool) then
-				local trees = getTrees(r, CFG.ChopRadius, tool)
+			if r and tool then
+				local trees = getTrees(r, CFG.ChopRadius)
 				if #trees == 0 then
-					trees = getTrees(r, nil, tool)
+					trees = getTrees(r, nil)
 				end
 				if #trees > 0 then
 					local chosen = trees[1]
-					local broken = false
+					local ok = false
 					pcall(function()
-						broken = tpToTreeAndChop(chosen.m, chosen.p, tool)
+						ok = tpToTreeAndChop(chosen.m, chosen.p, tool)
 					end)
-					isChoppingNow = false
-					if broken then
-						skipTree[chosen.m] = os.clock() + 60
-					else
-						skipTree[chosen.m] = os.clock() + 5
-					end
+					skipTree[chosen.m] = os.clock() + (ok and 3.5 or 1.5)
 				end
 			end
-			task.wait(0.12)
+			task.wait(0.25)
 		else
-			isChoppingNow = false
-			lastEquippedChopTool = nil
 			task.wait(0.25)
 		end
 	end
@@ -1647,10 +1235,8 @@ local function startFly()
 	end)
 end
 
-Player.CharacterAdded:Connect(function(char)
-	task.wait(0.5)
-	resetCounter()
-	if CFG.GodMode then bindGodModeToChar(char) end
+Player.CharacterAdded:Connect(function()
+	task.wait(0.5); resetCounter()
 	if CFG.Fly then startFly() end
 end)
 
@@ -1875,7 +1461,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- TP, PULL, FUEL (FILTERED), SCRAPPER (FILTERED) & PLANT ACTIONS
+-- TP, PULL, FUEL & PLANT ACTIONS (OPTIMIZED)
 --========================================================
 
 local function tpTo(m)
@@ -1947,7 +1533,6 @@ local function pullAllExact(nameList)
 	return count
 end
 
--- ===== LỬA TRẠI (CÓ BẢNG LỌC CHO PHÉP / CẤM TP) =====
 local droppedAt = {}
 local function dumpFuelToFire()
 	local fp = getFirePart()
@@ -1962,9 +1547,7 @@ local function dumpFuelToFire()
 		if ch and o:IsDescendantOf(ch) then continue end
 		if Players:GetPlayerFromCharacter(o) then continue end
 		if (droppedAt[o] or 0) + 20 > os.clock() then continue end
-		-- Chỉ TP những vật phẩm được tích chọn cho phép trong bảng FireAllowedItems
-		if not FireAllowedItems[o.Name] then continue end
-
+		if not matchesExact(o.Name, FUEL_EXACT) then continue end
 		seen[o] = true
 		if not o.PrimaryPart then pcall(function() o.PrimaryPart = partOf(o) end) end
 		if not o.PrimaryPart then continue end
@@ -1983,59 +1566,6 @@ task.spawn(function()
 	while true do
 		task.wait(5)
 		if CFG.AutoDrop then pcall(dumpFuelToFire) end
-	end
-end)
-
--- ===== SCRAPPER (CÓ BẢNG LỌC CHO PHÉP / CẤM TP) =====
-local cachedScrapperPart = nil
-local function getScrapperPart()
-	if cachedScrapperPart and cachedScrapperPart.Parent then
-		return cachedScrapperPart
-	end
-	local map = Workspace:FindFirstChild("Map")
-	local obj = (map and map:FindFirstChild("Scrapper", true))
-		or Workspace:FindFirstChild("Scrapper", true)
-	cachedScrapperPart = obj and partOf(obj) or nil
-	return cachedScrapperPart
-end
-
-local scrapDroppedAt = setmetatable({}, { __mode = "k" })
-local function dumpScrapToScrapper()
-	local sp = getScrapperPart()
-	if not (sp and DragRE and StopDragRE) then return 0 end
-
-	local ch, count, seen = Player.Character, 0, {}
-	local itemsFolder = Workspace:FindFirstChild("Items")
-	local searchList  = itemsFolder and itemsFolder:GetDescendants() or Workspace:GetChildren()
-
-	for _, o in ipairs(searchList) do
-		if not o:IsA("Model") or seen[o] then continue end
-		if ch and o:IsDescendantOf(ch) then continue end
-		if Players:GetPlayerFromCharacter(o) then continue end
-		if (scrapDroppedAt[o] or 0) + 15 > os.clock() then continue end
-		-- Chỉ TP những vật phẩm được tích chọn cho phép trong bảng ScrapAllowedItems
-		if not ScrapAllowedItems[o.Name] then continue end
-
-		seen[o] = true
-		if not o.PrimaryPart then pcall(function() o.PrimaryPart = partOf(o) end) end
-		if not o.PrimaryPart then continue end
-
-		scrapDroppedAt[o] = os.clock()
-		local offset = Vector3.new(math.random(-15,15)/10, 6 + count * 0.4, math.random(-15,15)/10)
-		pcall(DragRE.FireServer, DragRE, o)
-		pcall(function() o:SetPrimaryPartCFrame(CFrame.new(sp.Position + offset)) end)
-		task.wait(0.05)
-		pcall(StopDragRE.FireServer, StopDragRE, o)
-		count += 1
-		task.wait(0.1)
-	end
-	return count
-end
-
-task.spawn(function()
-	while true do
-		task.wait(4)
-		if CFG.AutoScrap then pcall(dumpScrapToScrapper) end
 	end
 end)
 
@@ -2436,144 +1966,6 @@ function Library:CreateWindow(title)
 				return f
 			end
 
-			-- BẢNG CHỌN VẬT PHẨM CHO PHÉP / KHÔNG CHO PHÉP TP (DẠNG LƯỚI 2 CỘT)
-			function Section:AddItemFilterTable(tableTitle, itemList, stateMap)
-				local wrap = Instance.new("Frame")
-				wrap.Size = UDim2.new(1, -12, 0, 0)
-				wrap.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-				wrap.AutomaticSize = Enum.AutomaticSize.Y
-				wrap.Parent = container
-				Instance.new("UICorner", wrap).CornerRadius = UDim.new(0, 6)
-
-				local st = Instance.new("UIStroke", wrap)
-				st.Color = Color3.fromRGB(70, 70, 70)
-				st.Thickness = 1
-
-				local wLayout = Instance.new("UIListLayout", wrap)
-				wLayout.Padding = UDim.new(0, 5)
-				wLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-				local wPad = Instance.new("UIPadding", wrap)
-				wPad.PaddingTop = UDim.new(0, 6)
-				wPad.PaddingBottom = UDim.new(0, 6)
-				wPad.PaddingLeft = UDim.new(0, 6)
-				wPad.PaddingRight = UDim.new(0, 6)
-
-				local header = Instance.new("TextLabel")
-				header.Size = UDim2.new(1, 0, 0, 18)
-				header.BackgroundTransparency = 1
-				header.Text = tableTitle
-				header.TextColor3 = currentColor
-				header.Font = Enum.Font.GothamBold
-				header.TextSize = 11
-				header.TextXAlignment = Enum.TextXAlignment.Left
-				header.Parent = wrap
-
-				local sub = Instance.new("TextLabel")
-				sub.Size = UDim2.new(1, 0, 0, 14)
-				sub.BackgroundTransparency = 1
-				sub.Text = "✓ Xanh = Cho phép TP | ✕ Đỏ = Chặn TP"
-				sub.TextColor3 = Color3.fromRGB(180, 180, 180)
-				sub.Font = Enum.Font.Gotham
-				sub.TextSize = 10
-				sub.TextXAlignment = Enum.TextXAlignment.Left
-				sub.Parent = wrap
-
-				-- Hàng nút Chọn tất cả / Bỏ chọn tất cả
-				local bulkRow = Instance.new("Frame")
-				bulkRow.Size = UDim2.new(1, 0, 0, 24)
-				bulkRow.BackgroundTransparency = 1
-				bulkRow.Parent = wrap
-
-				local btnAll = Instance.new("TextButton")
-				btnAll.Size = UDim2.new(0.485, 0, 1, 0)
-				btnAll.Position = UDim2.new(0, 0, 0, 0)
-				btnAll.BackgroundColor3 = Color3.fromRGB(32, 85, 45)
-				btnAll.Text = "✓ Cho phép tất cả"
-				btnAll.TextColor3 = Color3.fromRGB(220, 255, 220)
-				btnAll.Font = Enum.Font.GothamBold
-				btnAll.TextSize = 10
-				btnAll.Parent = bulkRow
-				Instance.new("UICorner", btnAll).CornerRadius = UDim.new(0, 4)
-
-				local btnNone = Instance.new("TextButton")
-				btnNone.Size = UDim2.new(0.485, 0, 1, 0)
-				btnNone.Position = UDim2.new(0.515, 0, 0, 0)
-				btnNone.BackgroundColor3 = Color3.fromRGB(95, 35, 35)
-				btnNone.Text = "✕ Chặn tất cả"
-				btnNone.TextColor3 = Color3.fromRGB(255, 220, 220)
-				btnNone.Font = Enum.Font.GothamBold
-				btnNone.TextSize = 10
-				btnNone.Parent = bulkRow
-				Instance.new("UICorner", btnNone).CornerRadius = UDim.new(0, 4)
-
-				-- Lưới 2 cột chứa các ô vật phẩm
-				local grid = Instance.new("Frame")
-				grid.Size = UDim2.new(1, 0, 0, 0)
-				grid.BackgroundTransparency = 1
-				grid.AutomaticSize = Enum.AutomaticSize.Y
-				grid.Parent = wrap
-
-				local gLayout = Instance.new("UIGridLayout", grid)
-				gLayout.CellSize = UDim2.new(0.485, 0, 0, 28)
-				gLayout.CellPadding = UDim2.new(0.03, 0, 0, 5)
-				gLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-				local cellUpdaters = {}
-
-				for idx, itemName in ipairs(itemList) do
-					local cell = Instance.new("TextButton")
-					cell.LayoutOrder = idx
-					cell.Font = Enum.Font.GothamBold
-					cell.TextSize = 10
-					cell.TextTruncate = Enum.TextTruncate.AtEnd
-					cell.Parent = grid
-					Instance.new("UICorner", cell).CornerRadius = UDim.new(0, 4)
-
-					local cellStroke = Instance.new("UIStroke", cell)
-					cellStroke.Thickness = 1
-
-					local function refreshCell()
-						local allowed = stateMap[itemName] == true
-						if allowed then
-							cell.BackgroundColor3 = Color3.fromRGB(28, 70, 38)
-							cell.TextColor3 = Color3.fromRGB(165, 255, 180)
-							cell.Text = "✓ " .. itemName
-							cellStroke.Color = Color3.fromRGB(75, 190, 95)
-						else
-							cell.BackgroundColor3 = Color3.fromRGB(68, 28, 28)
-							cell.TextColor3 = Color3.fromRGB(255, 165, 165)
-							cell.Text = "✕ " .. itemName
-							cellStroke.Color = Color3.fromRGB(185, 70, 70)
-						end
-					end
-
-					refreshCell()
-					table.insert(cellUpdaters, refreshCell)
-
-					cell.MouseButton1Click:Connect(function()
-						stateMap[itemName] = not (stateMap[itemName] == true)
-						refreshCell()
-					end)
-				end
-
-				btnAll.MouseButton1Click:Connect(function()
-					for _, name in ipairs(itemList) do
-						stateMap[name] = true
-					end
-					for _, fn in ipairs(cellUpdaters) do fn() end
-				end)
-
-				btnNone.MouseButton1Click:Connect(function()
-					for _, name in ipairs(itemList) do
-						stateMap[name] = false
-					end
-					for _, fn in ipairs(cellUpdaters) do fn() end
-				end)
-
-				return wrap
-			end
-
 			function Section:AddSlider(text, min, max, defaultOrCb, maybeCb)
 				local default = min
 				local callback = nil
@@ -2735,59 +2127,28 @@ holdBtn(0,  "▲", function(v) padUp   = v end)
 holdBtn(68, "▼", function(v) padDown = v end)
 
 --========================================================
--- BUILD MENU & CONFLICT WARNING
+-- BUILD MENU
 --========================================================
 
 local Win = Library:CreateWindow("SUNSET")
-
-local chopWarnLbl = nil
-local function refreshChopCombatWarning()
-	local bothOn = CFG.KillAura and CFG.AutoChop
-	if chopWarnLbl and chopWarnLbl.Parent then
-		if bothOn then
-			chopWarnLbl.Text = "⚠️ Đang bật cả Kill Aura & Auto Chop (dễ xung đột vũ khí)!"
-			chopWarnLbl.TextColor3 = Color3.fromRGB(255, 85, 85)
-		else
-			chopWarnLbl.Text = "✅ Không xung đột vũ khí"
-			chopWarnLbl.TextColor3 = Color3.fromRGB(140, 230, 140)
-		end
-	end
-	if bothOn and Win and Win.Notify then
-		Win:Notify(
-			"⚠️ Cảnh báo xung đột vũ khí",
-			"Đang bật cả Kill Aura và TP Auto Chop. Nên tắt Kill Aura khi farm gỗ để chặt mượt hơn!",
-			5
-		)
-	end
-end
 
 -- TAB 1: CHÍNH
 local TabMain = Win:CreateTab("Chính")
 do
 	local sCombat = TabMain:AddSection("COMBAT & FARM")
 	local tool = getKillTool()
-	local chopTool = getChopTool()
-	sCombat:AddLabel("🗡 Vũ khí: " .. (tool and tool.Name or "Không có") .. " | 🪓 Rìu: " .. (chopTool and chopTool.Name or "Không có"))
+	sCombat:AddLabel("🗡 Vũ khí: " .. (tool and tool.Name or "Không có"))
 
-	sCombat:AddToggle("Kill Aura", CFG.KillAura, function(v)
-		CFG.KillAura = v
-		refreshChopCombatWarning()
-	end)
+	sCombat:AddToggle("Kill Aura", CFG.KillAura, function(v) CFG.KillAura = v end)
 	sCombat:AddSlider("Kill Radius", 10, 500, CFG.KillRadius, function(v) CFG.KillRadius = v end)
 
-	sCombat:AddToggle("TP Auto Chop (Chặt gãy mới đổi)", CFG.AutoChop, function(v)
-		CFG.AutoChop = v
-		refreshChopCombatWarning()
-	end)
+	sCombat:AddToggle("TP Auto Chop (Chặt cây)", CFG.AutoChop, function(v) CFG.AutoChop = v end)
 	sCombat:AddSlider("Chop Radius", 10, 500, CFG.ChopRadius, function(v) CFG.ChopRadius = v end)
-
-	chopWarnLbl = sCombat:AddLabel("✅ Không xung đột vũ khí")
-	chopWarnLbl.TextColor3 = Color3.fromRGB(140, 230, 140)
 
 	sCombat:AddSlider("Delay (x10ms)", 5, 60, math.floor(CFG.Delay * 100), function(v) CFG.Delay = v / 100 end)
 
 	local sChest = TabMain:AddSection("RƯƠNG, ĐẠN & ĐỒNG XU")
-	sChest:AddToggle("Mở rương (2-3/lần, 1 đồ/rương)", CFG.AutoChestAndLoot, function(v)
+	sChest:AddToggle("Mở rương + nhặt đồ & đạn (2s)", CFG.AutoChestAndLoot, function(v)
 		CFG.AutoChestAndLoot = v
 		if v then
 			task.spawn(function() refreshAmmoCache(true) end)
@@ -2811,13 +2172,6 @@ do
 	coinStatusLbl = sChest:AddLabel(coinStatusText)
 
 	local sSurv = TabMain:AddSection("SINH TỒN & TRỒNG CÂY")
-	sSurv:AddToggle("🛡️ God Mode (Bất tử / Khóa máu)", CFG.GodMode, function(v)
-		setGodMode(v)
-		if Win and Win.Notify then
-			Win:Notify("🛡️ God Mode", v and "Đã bật God Mode (Bất tử)" or "Đã tắt God Mode", 3)
-		end
-	end)
-
 	sSurv:AddToggle("Auto Eat Carrot", CFG.AutoEat, function(v)
 		CFG.AutoEat = v
 		if not v then updateEatStatus("Tắt") end
@@ -2918,22 +2272,6 @@ do
 	sFire:AddButton("🪵 Dồn nhiên liệu → Lửa ngay", function()
 		task.spawn(function() dumpFuelToFire() end)
 	end)
-	-- Bảng chọn vật phẩm được phép / không cho phép TP về Lửa trại
-	sFire:AddItemFilterTable("🔥 Bảng chọn vật phẩm TP về Lửa trại", FUEL_EXACT, FireAllowedItems)
-
-	local sScrap = TabItems:AddSection("SCRAPPER")
-	sScrap:AddButton("📍 TP tới Scrapper", function()
-		local sp, r = getScrapperPart(), root()
-		if sp and r then r.CFrame = CFrame.new(sp.Position + Vector3.new(0, 5, 0)) end
-	end)
-	sScrap:AddToggle("Auto dồn nguyên liệu → Scrapper", CFG.AutoScrap, function(v)
-		CFG.AutoScrap = v
-	end)
-	sScrap:AddButton("⚙️ Dồn nguyên liệu → Scrapper ngay", function()
-		task.spawn(dumpScrapToScrapper)
-	end)
-	-- Bảng chọn vật phẩm được phép / không cho phép TP về Scrapper
-	sScrap:AddItemFilterTable("⚙️ Bảng chọn vật phẩm TP về Scrapper", SCRAPPER_ITEMS, ScrapAllowedItems)
 
 	local sPull = TabItems:AddSection("KÉO VẬT PHẨM VỀ NGƯỜI")
 	sPull:AddButton("🍎 Kéo thức ăn", function()
