@@ -77,7 +77,6 @@ local FUEL_EXACT = {
 	"Log","Chair","Biofuel","Coal",
 	"Purple Fur Tuft","Fuel Canister","Oil Barrel",
 }
--- Nguyên liệu dồn vào Scrapper (Log & Chair đã nằm trong FUEL_EXACT nên không đưa vào đây)
 local SCRAPPER_ITEMS = {
 	"Bolt","Sheet Metal","Broken Fan","Broken Radio",
 	"Broken Microwave","Washing Machine","Tires & Engines",
@@ -152,7 +151,6 @@ local function partOf(m)
 	if m:IsA("BasePart") then return m end
 	if m:IsA("Model") then
 		if m.PrimaryPart then return m.PrimaryPart end
-		-- Ưu tiên lấy phần thân cây / hitbox nếu có
 		for _, child in ipairs(m:GetDescendants()) do
 			if child:IsA("BasePart") and hasKey(child.Name, { "Trunk", "Wood", "Log", "Hitbox", "Stem" }) then
 				return child
@@ -462,13 +460,13 @@ local failedLootAt    = {}
 local claimedAmmo     = setmetatable({}, { __mode = "k" })
 local failedAmmoAt    = {}
 
-local CHEST_FAIL_COOLDOWN  = 5      -- rương lỗi chỉ bị bỏ tạm 5 giây
+local CHEST_FAIL_COOLDOWN  = 5
 local LOOT_FAIL_COOLDOWN   = 35
 local AMMO_FAIL_COOLDOWN   = 15
 local CHEST_LOOT_RADIUS    = 12
-local CHEST_OPEN_DELAY     = 0.35   -- chờ rương rơi đồ trước khi quét
-local CHEST_CYCLE_WAIT     = 1      -- nghỉ 1 giây giữa các chu kỳ
-local CHESTS_MIN_PER_CYCLE = 2      -- mỗi chu kỳ mở ngẫu nhiên 2-3 rương
+local CHEST_OPEN_DELAY     = 0.35
+local CHEST_CYCLE_WAIT     = 1
+local CHESTS_MIN_PER_CYCLE = 2
 local CHESTS_MAX_PER_CYCLE = 3
 
 local totalChestsOpened  = 0
@@ -731,22 +729,15 @@ local function openSingleChest(chest)
 	return ok == true
 end
 
--- ===== BỘ LỌC VẬT PHẨM RƯƠNG =====
 local Filter = {}
-
--- Danh sách vật phẩm đáng giá (theo wiki 99 Nights) + các món script đang dùng
 Filter.wanted = {}
 local CHEST_WANTED_LIST = {
-	-- Rương thường / tốt / sắt / huyền thoại
 	"Bandage","Good Sack","Good Axe","Old Flashlight","Spear","Revolver","Fuel Canister",
 	"Leather Body","Rifle","Strong Flashlight","Defensive Blueprint Spikes",
 	"Iron Body","Strong Axe","Giant Sack","Medkit","Oil Barrel",
-	-- Rương vàng / giáo phái
 	"Morningstar","Dynamite","Impact Grenade","Bear Trap","Ammo Crate Recipe Tablet","Cultist Gem",
-	-- Rương hồng ngọc / assassin / người ngoài hành tinh / hang động
 	"Chainsaw","Kunai","Thorn Armor","Throwing Knives",
 	"Raygun","Laser Sword","Laser Cannon","Alien Armor","Laser Fence Blueprint",
-	-- Rương kim cương
 	"Diamond","Diamonds",
 }
 for _, n in ipairs(CHEST_WANTED_LIST) do Filter.wanted[n] = true end
@@ -754,7 +745,6 @@ for _, n in ipairs(AXES) do Filter.wanted[n] = true end
 for _, n in ipairs(MELEE_WEAPONS) do Filter.wanted[n] = true end
 for _, n in ipairs(SACK_NAMES) do Filter.wanted[n] = true end
 
--- Kiểm tra balo có vật phẩm trùng tên không (Inventory, Character, ItemBag)
 local function hasItemInBackpack(name)
 	local inv = Player:FindFirstChild("Inventory")
 	if inv and inv:FindFirstChild(name) then return true end
@@ -765,7 +755,6 @@ local function hasItemInBackpack(name)
 	return false
 end
 
--- Đặt vị trí vật phẩm (Model / BasePart / Tool)
 local function setItemPosition(item, goalCF)
 	if item:IsA("Model") then
 		if not item.PrimaryPart then pcall(function() item.PrimaryPart = partOf(item) end) end
@@ -791,7 +780,6 @@ local function moveItemTo(item, worldPos)
 	return true
 end
 
--- Đặt vật phẩm ngay cạnh rương (cách ~3.5 studs, ngẫu nhiên hướng)
 local function moveItemBesideChest(item, chest)
 	local cp = partOf(chest)
 	if not cp then return false end
@@ -800,11 +788,6 @@ local function moveItemBesideChest(item, chest)
 	return moveItemTo(item, pos)
 end
 
--- Xử lý tối đa 1 món được nhặt mỗi rương:
---  - Không nằm trong danh sách  -> bỏ qua, không TP
---  - Trùng với đồ trong balo    -> TP ra kế bên rương, đánh dấu để không xét lại
---  - Hợp lệ & chưa có trong balo -> nhặt (dừng lại sau khi nhặt được 1 món)
---  - Nhặt thất bại              -> để nguyên, cooldown rồi thử lại sau
 local function lootOneItemAtChest(chest, chestPos)
 	local items = scanLootAtChestPos(chestPos, chest, os.clock())
 	if #items == 0 then return "empty" end
@@ -833,9 +816,7 @@ local function lootOneItemAtChest(chest, chestPos)
 	end
 	return result
 end
--- ===== END BỘ LỌC =====
 
--- Lấy toàn bộ rương còn mở được, sắp theo khoảng cách (không giới hạn bán kính)
 local function getAvailableChests(now)
 	local r = root()
 	local rPos = r and r.Position
@@ -1110,7 +1091,6 @@ local function equipToolSafe(tool)
 end
 
 local function unequipToolSafe(tool)
-	-- Chỉ unequip nếu tool vẫn tồn tại hợp lệ và đang thực sự cầm trên Character
 	if not (UnequipRE and isToolValid(tool)) then return end
 	if not isToolEquippedOnChar(tool) then return end
 	pcall(UnequipRE.FireServer, UnequipRE, "FireAllClients", tool)
@@ -1120,7 +1100,6 @@ local function unequipToolSafe(tool)
 	task.wait(0.05)
 end
 
--- Chỉ gửi lệnh Equip nếu rìu chưa được cầm trên Character (tránh spam Equip gây mất rìu)
 local function equipChopToolOnce(tool)
 	if not (EquipRE and isToolValid(tool)) then return false end
 	if isToolEquippedOnChar(tool) then
@@ -1139,7 +1118,6 @@ local function swingBatch(tool, targets)
 	if not (EquipRE and UnequipRE and DamageRF) or #targets == 0 then return end
 	if not isToolValid(tool) then return end
 
-	-- Nếu AutoChop đang giữ rìu thì không để KillAura tự ý unequip làm mất đồng bộ
 	local sharedWithChop = isChoppingNow and (lastEquippedChopTool == tool)
 
 	equipToolSafe(tool)
@@ -1212,7 +1190,6 @@ local function findNilEquivalent(targetName, targetDebugId)
 	return nil
 end
 
--- Kiểm tra xem cây đã gãy hoặc bị phá hủy chưa
 local function isTreeBroken(treeModel, treePart)
 	if not treeModel or not treeModel.Parent then return true end
 	if not treePart or not treePart.Parent then return true end
@@ -1235,7 +1212,6 @@ local function isTreeBroken(treeModel, treePart)
 	return false
 end
 
--- Chuẩn hóa chuỗi để so khớp linh hoạt (bỏ khoảng trắng/chữ hoa thường)
 local function normalizeName(str)
 	if type(str) ~= "string" then return "" end
 	return string.lower(string.gsub(str, "%s+", ""))
@@ -1253,16 +1229,11 @@ local function isBigTreeName(name)
 		or string.find(n, "treebig2", 1, true) ~= nil
 end
 
--- Chỉ Strong Axe, Chainsaw, Admin Axe mới chặt được treebig1 và treebig2
 local function canChopBigTree(tool)
 	if not tool then return false end
 	return HEAVY_AXES[tool.Name] == true
 end
 
--- Trả về:
---   "normal" -> Small Tree (mọi rìu chặt được)
---   "big"    -> treebig1, treebig 2 (chỉ Strong Axe, Chainsaw, Admin Axe)
---   nil      -> không phải loại cây hợp lệ hoặc đã gãy
 local function classifyTree(treeModel)
 	if not treeModel or not treeModel.Parent or not treeModel:IsA("Model") then
 		return nil
@@ -1300,7 +1271,7 @@ local function getTrees(r, maxRadius, tool)
 			return
 		end
 		if treeType == "big" and not allowBig then
-			return -- Không có Strong Axe / Chainsaw / Admin Axe thì bỏ qua treebig1 & treebig 2
+			return
 		end
 
 		local p = partOf(t); if not p then return end
@@ -1401,12 +1372,10 @@ local function tpToTreeAndChop(treeModel, treePart, initialTool)
 	local failedHits = 0
 	local spamWait = math.min(math.max(CFG.Delay or 0.06, 0.05), 0.12)
 
-	-- Spam ToolDamageObject liên tục cho đến khi cây gãy hẳn mới chuyển cây khác
 	while CFG.AutoChop and not isTreeBroken(treeModel, treePart) and swings < maxSwings do
 		local rr = root()
 		if not rr then break end
 
-		-- Kiểm tra rìu đang khóa còn hợp lệ không; chỉ tìm rìu khác nếu rìu cũ không còn
 		if not isToolValid(lockedTool) then
 			local fallback = getChopTool()
 			if not isToolValid(fallback) then break end
@@ -1439,7 +1408,6 @@ local function tpToTreeAndChop(treeModel, treePart, initialTool)
 	return isTreeBroken(treeModel, treePart)
 end
 
--- Luồng riêng cho Kill Aura
 task.spawn(function()
 	while true do
 		if CFG.KillAura then
@@ -1457,7 +1425,6 @@ task.spawn(function()
 	end
 end)
 
--- Luồng riêng cho TP Auto Chop
 task.spawn(function()
 	while true do
 		if CFG.AutoChop then
@@ -1483,7 +1450,6 @@ task.spawn(function()
 			end
 			task.wait(0.12)
 		else
-			-- Không tự động gọi unequipToolSafe khi tắt AutoChop để tránh server xóa/desync rìu
 			isChoppingNow = false
 			lastEquippedChopTool = nil
 			task.wait(0.25)
@@ -1974,7 +1940,6 @@ task.spawn(function()
 	end
 end)
 
--- ===== SCRAPPER =====
 local cachedScrapperPart = nil
 local function getScrapperPart()
 	if cachedScrapperPart and cachedScrapperPart.Parent then
@@ -2025,7 +1990,6 @@ task.spawn(function()
 		if CFG.AutoScrap then pcall(dumpScrapToScrapper) end
 	end
 end)
--- ===== END SCRAPPER =====
 
 local function plantAllSaplings(statusLbl)
 	local function setStatus(txt)
@@ -2082,22 +2046,55 @@ local function revealMap()
 end
 
 --========================================================
--- SUNSET UI LIBRARY
+-- SUNSET UI LIBRARY (SAFE PARENT + SAFE TAB ACTIVATION)
 --========================================================
+
+local function attachGuiSafely(guiObj)
+	guiObj.Parent = PlayerGui
+	pcall(function()
+		if gethui then
+			local hui = gethui()
+			if hui then guiObj.Parent = hui; return end
+		end
+	end)
+	pcall(function()
+		if CoreGui and CoreGui.Name == "CoreGui" then
+			local test = Instance.new("Folder")
+			test.Parent = CoreGui
+			test:Destroy()
+			guiObj.Parent = CoreGui
+		end
+	end)
+end
+
+local function triggerButtonClick(btn)
+	if not btn then return end
+	if type(firesignal) == "function" then
+		local ok = pcall(firesignal, btn.MouseButton1Click)
+		if ok then return end
+	end
+	if type(getconnections) == "function" then
+		local ok, conns = pcall(getconnections, btn.MouseButton1Click)
+		if ok and type(conns) == "table" then
+			for _, c in ipairs(conns) do
+				if c and c.Function then
+					pcall(c.Function)
+				end
+			end
+			return
+		end
+	end
+end
 
 local Library = {}
 
 function Library:CreateWindow(title)
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "SunsetUI"
-	gui.Parent = CoreGui.Parent and CoreGui or PlayerGui
-	pcall(function() gui.Parent = CoreGui end)
-	if gui.Parent ~= CoreGui then
-		gui.Parent = PlayerGui
-	end
 	gui.IgnoreGuiInset = true
 	gui.ResetOnSpawn = false
 	gui.DisplayOrder = 100
+	attachGuiSafely(gui)
 
 	local currentColor = Color3.fromRGB(255, 128, 0)
 	local toggleButton = nil
@@ -2184,6 +2181,7 @@ function Library:CreateWindow(title)
 	mainFrame.Position = UDim2.new(0.5, -225, 0.5, -190)
 	mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 	mainFrame.BackgroundTransparency = 0.2
+	mainFrame.Visible = true
 	mainFrame.Parent = gui
 	Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 
@@ -2240,7 +2238,7 @@ function Library:CreateWindow(title)
 
 	local currentTab
 	local tabY = 35
-	local tabOrderList = {}
+	local tabEntries = {}
 
 	local windowFunctions = {}
 
@@ -2256,7 +2254,6 @@ function Library:CreateWindow(title)
 		btn.Parent = sidebarFrame
 		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
 		tabY = tabY + 33
-		table.insert(tabOrderList, btn)
 
 		local Tab = Instance.new("ScrollingFrame")
 		Tab.Size = UDim2.new(1, 0, 1, 0)
@@ -2279,7 +2276,7 @@ function Library:CreateWindow(title)
 		pad.PaddingTop = UDim.new(0, 8)
 		pad.PaddingBottom = UDim.new(0, 10)
 
-		btn.MouseButton1Click:Connect(function()
+		local function selectThisTab()
 			for _, child in ipairs(sidebarFrame:GetChildren()) do
 				if child:IsA("TextButton") then
 					child.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
@@ -2291,7 +2288,10 @@ function Library:CreateWindow(title)
 			if currentTab then currentTab.Visible = false end
 			currentTab = Tab
 			Tab.Visible = true
-		end)
+		end
+
+		btn.MouseButton1Click:Connect(selectThisTab)
+		table.insert(tabEntries, { btn = btn, selectFn = selectThisTab })
 
 		local Elements = {}
 
@@ -2535,8 +2535,8 @@ function Library:CreateWindow(title)
 	end)
 
 	task.defer(function()
-		if tabOrderList[1] then
-			firesignal(tabOrderList[1].MouseButton1Click)
+		if tabEntries[1] and tabEntries[1].selectFn then
+			tabEntries[1].selectFn()
 		end
 	end)
 
@@ -2552,11 +2552,7 @@ flyPad.Size = UDim2.fromOffset(60, 124)
 flyPad.Position = UDim2.new(1, -70, 1, -132)
 flyPad.BackgroundTransparency = 1
 flyPad.Visible = false
-flyPad.Parent = CoreGui.Parent and CoreGui or PlayerGui
-pcall(function() flyPad.Parent = CoreGui end)
-if flyPad.Parent ~= CoreGui then
-	flyPad.Parent = PlayerGui
-end
+attachGuiSafely(flyPad)
 
 local function holdBtn(yOff, text, onState)
 	local b = Instance.new("TextButton")
