@@ -1,6 +1,6 @@
 --========================================================
--- SUNSET UI + OLLIE 99 NIGHTS (FIXED SCRAPPER & ZERO-LAG CHEST LOOT)
--- Scrapper: Strict Items-Only Exact Filter (No Buildings/Treehouses)
+-- SUNSET UI + OLLIE 99 NIGHTS (STRICT ITEMS SCRAPPER & ZERO-LAG CHEST LOOT)
+-- Scrapper: Map Blocked + Non-Anchored + Items:GetChildren() + Case-Sensitive Exact
 -- Chest Loot: Event-Cached Zero-Lag Loop + Custom Whitelist
 --========================================================
 
@@ -70,7 +70,7 @@ local SCRAPPER_KEYS = {
 	"Scrapper", "Grinder", "Recycler", "Anvil",
 }
 
--- Chỉ tên chính xác của phế liệu sắt + gỗ/ghế (không khớp từ khóa con để tránh dính nhà)
+-- Tên chính xác (case-sensitive) của phế liệu sắt + gỗ/ghế
 local SCRAP_EXACT = {
 	"Bolt", "Sheet Metal", "Tyre", "Tires & Engines",
 	"Metal Chair", "Chair", "Log",
@@ -217,7 +217,6 @@ local function isWorldArchitecture(obj)
 	if mapFolder and obj:IsDescendantOf(mapFolder) then
 		return true
 	end
-	-- Nếu là Model quá lớn (nhà cây, lều, kiến trúc), không bao giờ coi là vật phẩm nhặt/nghiền
 	if obj:IsA("Model") then
 		local ok, _, sz = pcall(function() return obj:GetBoundingBox() end)
 		if ok and sz and (sz.X > 12 or sz.Y > 12 or sz.Z > 12) then
@@ -1563,7 +1562,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- TP, PULL, WIDE ONE-BY-ONE FIRE FUEL & STRICT ITEMS-ONLY SCRAPPER
+-- TP, PULL, WIDE ONE-BY-ONE FIRE FUEL & STRICT SCRAPPER TP
 --========================================================
 
 local function tpTo(m)
@@ -1714,7 +1713,7 @@ task.spawn(function()
 	end
 end)
 
--- ITEMS-ONLY EXACT SCRAPPER TP (NO BUILDINGS, DROP FROM ABOVE)
+-- STRICT SCRAPPER TP (NO MAP, NON-ANCHORED, ITEMS:GETCHILDREN(), CASE-SENSITIVE EXACT)
 local scrapStatusText = "Chờ bật auto TP Scrapper..."
 local scrapStatusLbl  = nil
 local isMovingScrap   = false
@@ -1729,21 +1728,43 @@ end
 
 local function isValidScrapItem(obj)
 	if not obj or not obj.Parent then return false end
-	if not (obj:IsA("Model") or obj:IsA("BasePart")) then return false end
-	if isWorldArchitecture(obj) then return false end
 
+	-- Phải là Model hoặc BasePart
+	if not (obj:IsA("Model") or obj:IsA("BasePart")) then return false end
+
+	-- Không được là con của Map (sàn, tường, nhà)
+	local mapFolder = Workspace:FindFirstChild("Map")
+	if mapFolder and obj:IsDescendantOf(mapFolder) then return false end
+
+	-- Không được là con của nhân vật hoặc người chơi khác
 	local ch = Player.Character
-	if (ch and obj:IsDescendantOf(ch)) or Players:GetPlayerFromCharacter(obj) then
-		return false
+	if ch and obj:IsDescendantOf(ch) then return false end
+	if Players:GetPlayerFromCharacter(obj) then return false end
+
+	-- Không được là kiến trúc (anchored + lớn)
+	if obj:IsA("BasePart") then
+		if obj.Anchored then return false end
+		if obj.Size.X > 6 or obj.Size.Y > 6 or obj.Size.Z > 6 then return false end
+	end
+	if obj:IsA("Model") then
+		-- Model quá lớn → nhà/kiến trúc
+		local ok, sz = pcall(function()
+			local _, s = obj:GetBoundingBox(); return s
+		end)
+		if ok and sz and (sz.X > 8 or sz.Y > 8 or sz.Z > 8) then return false end
 	end
 
+	-- Không được là Scrapper, cây, lửa
 	local okN, name = pcall(function() return obj.Name end)
 	if not okN or type(name) ~= "string" then return false end
-	if hasKey(name, SCRAPPER_KEYS) or hasKey(name, { "Campfire", "MainFire", "Tree", "Sapling" }) then
-		return false
-	end
+	if hasKey(name, SCRAPPER_KEYS) then return false end
+	if hasKey(name, {"Campfire","MainFire","Tree","Sapling","Wall","Floor","Part","Baseplate"}) then return false end
 
-	return matchesExact(name, SCRAP_EXACT)
+	-- Phải khớp đúng tên trong SCRAP_EXACT (case-sensitive)
+	for _, v in ipairs(SCRAP_EXACT) do
+		if name == v then return true end
+	end
+	return false
 end
 
 local function sendScrapToScrapper()
@@ -1757,8 +1778,15 @@ local function sendScrapToScrapper()
 			return 0
 		end
 
+		-- Chỉ quét folder Items, không quét Workspace root
 		local itemsFolder = Workspace:FindFirstChild("Items")
-		local scanList = itemsFolder and itemsFolder:GetChildren() or Workspace:GetChildren()
+		if not itemsFolder then
+			updateScrapStatus("⚠️ Không tìm thấy folder Items")
+			return 0
+		end
+
+		-- Dùng GetChildren (không GetDescendants) để tránh part con của nhà
+		local scanList = itemsFolder:GetChildren()
 		local count = 0
 
 		for i = 1, #scanList do
@@ -1775,7 +1803,7 @@ local function sendScrapToScrapper()
 					if moveItemToCFrame(o, dropCF) then
 						count += 1
 						totalScrapMoved += 1
-						updateScrapStatus(string.format("⚙️ Rớt %s xuống Scrapper (Tổng: %d)", o.Name, totalScrapMoved))
+						updateScrapStatus(string.format("⚙️ Rớt %s → Scrapper (Tổng: %d)", o.Name, totalScrapMoved))
 						task.wait(0.05)
 					end
 				end
@@ -1783,7 +1811,7 @@ local function sendScrapToScrapper()
 		end
 
 		if count == 0 then
-			updateScrapStatus(string.format("⚙️ Đang quét vật phẩm · Đã rớt: %d", totalScrapMoved))
+			updateScrapStatus(string.format("⚙️ Đang quét · Đã rớt: %d", totalScrapMoved))
 		end
 		return count
 	end)
@@ -2522,7 +2550,7 @@ do
 		task.spawn(dumpFuelToFire)
 	end)
 
-	local sScrap = TabItems:AddSection("SCRAPPER (CHỈ VẬT PHẨM · RỚT TỪ TRÊN)")
+	local sScrap = TabItems:AddSection("SCRAPPER (CHỈ ITEMS · RỚT TỪ TRÊN)")
 	sScrap:AddButton("⚙️ TP Scrapper", tpScrapper)
 	sScrap:AddToggle("Auto TP phế liệu → Scrapper (Rớt trên)", CFG.AutoScrapper, function(v)
 		CFG.AutoScrapper = v
@@ -2583,5 +2611,5 @@ do
 end
 
 print("========================================")
-print(" SUNSET UI + 99 NIGHTS OPTIMIZED LOADED ✓")
+print(" SUNSET UI + 99 NIGHTS STRICT ITEMS LOADED ✓")
 print("========================================")
