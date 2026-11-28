@@ -15,15 +15,11 @@ local Player    = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local function getSafeGuiParent()
-	local okCore, core = pcall(function()
-		return CoreGui
-	end)
+	local okCore, core = pcall(function() return CoreGui end)
 	if okCore and core then
 		local test = Instance.new("Folder")
 		test.Name = "_SunsetTest"
-		local okSet = pcall(function()
-			test.Parent = core
-		end)
+		local okSet = pcall(function() test.Parent = core end)
 		if okSet and test.Parent == core then
 			pcall(function() test:Destroy() end)
 			return core
@@ -36,14 +32,10 @@ end
 local GuiParent = getSafeGuiParent()
 
 for _, name in ipairs({"OllieUI", "OllieMenu", "ollie_v9", "SunsetUI"}) do
-	pcall(function()
-		local g1 = PlayerGui:FindFirstChild(name)
-		if g1 then g1:Destroy() end
-	end)
+	pcall(function() local g = PlayerGui:FindFirstChild(name); if g then g:Destroy() end end)
 	pcall(function()
 		if GuiParent ~= PlayerGui then
-			local g2 = GuiParent:FindFirstChild(name)
-			if g2 then g2:Destroy() end
+			local g = GuiParent:FindFirstChild(name); if g then g:Destroy() end
 		end
 	end)
 end
@@ -86,9 +78,7 @@ local SACK_NAMES = {
 
 local FOOD_ITEMS = { "Berry", "Carrot", "Apple", "Corn", "Pumpkin", "Chili" }
 
-local SCRAPPER_KEYS = {
-	"Scrapper", "Grinder", "Recycler", "Anvil",
-}
+local SCRAPPER_KEYS = { "Scrapper", "Grinder", "Recycler", "Anvil" }
 
 local SCRAP_EXACT = {
 	"Bolt", "Sheet Metal", "Tyre", "Tires & Engines",
@@ -196,9 +186,7 @@ end
 local function matchesExact(name, list)
 	if type(name) ~= "string" then return false end
 	for _, v in ipairs(list) do
-		if name == v or string.lower(name) == string.lower(v) then
-			return true
-		end
+		if name == v or string.lower(name) == string.lower(v) then return true end
 	end
 	return false
 end
@@ -250,11 +238,8 @@ local function moveItemToCFrame(obj, goalCF)
 	if not obj or not obj.Parent then return false end
 	local ok = pcall(function()
 		if DragRE then pcall(DragRE.FireServer, DragRE, obj) end
-		if obj:IsA("Model") then
-			obj:PivotTo(goalCF)
-		elseif obj:IsA("BasePart") then
-			obj.CFrame = goalCF
-		end
+		if obj:IsA("Model") then obj:PivotTo(goalCF)
+		elseif obj:IsA("BasePart") then obj.CFrame = goalCF end
 	end)
 	if StopDragRE then pcall(StopDragRE.FireServer, StopDragRE, obj) end
 	return ok == true
@@ -262,8 +247,7 @@ end
 
 local function findFromList(list, inv, char)
 	for _, name in ipairs(list) do
-		local t = (inv and inv:FindFirstChild(name))
-			or (char and char:FindFirstChild(name))
+		local t = (inv and inv:FindFirstChild(name)) or (char and char:FindFirstChild(name))
 		if t then return t end
 	end
 end
@@ -281,32 +265,20 @@ end
 
 local function getKillTool()
 	local inv, char = Player:FindFirstChild("Inventory"), Player.Character
-	return findFromList(MELEE_WEAPONS, inv, char)
-		or findFromList(AXES, inv, char)
-		or getFallbackTool(inv, char)
+	return findFromList(MELEE_WEAPONS, inv, char) or findFromList(AXES, inv, char) or getFallbackTool(inv, char)
 end
 
 local function getChopTool()
 	local inv, char = Player:FindFirstChild("Inventory"), Player.Character
-	return findFromList(AXES, inv, char)
-		or findFromList(MELEE_WEAPONS, inv, char)
-		or getFallbackTool(inv, char)
+	return findFromList(AXES, inv, char) or findFromList(MELEE_WEAPONS, inv, char) or getFallbackTool(inv, char)
 end
 
 local function getSackTool()
 	local inv, char = Player:FindFirstChild("Inventory"), Player.Character
 	local exact = findFromList(SACK_NAMES, inv, char)
 	if exact then return exact end
-	if inv then
-		for _, item in ipairs(inv:GetChildren()) do
-			if hasKey(item.Name, { "Sack", "Bag" }) then return item end
-		end
-	end
-	if char then
-		for _, item in ipairs(char:GetChildren()) do
-			if hasKey(item.Name, { "Sack", "Bag" }) then return item end
-		end
-	end
+	if inv then for _, item in ipairs(inv:GetChildren()) do if hasKey(item.Name, {"Sack","Bag"}) then return item end end end
+	if char then for _, item in ipairs(char:GetChildren()) do if hasKey(item.Name, {"Sack","Bag"}) then return item end end end
 	return nil
 end
 
@@ -317,17 +289,13 @@ local function getFirePart()
 	local map = Workspace:FindFirstChild("Map")
 	local camp = map and map:FindFirstChild("Campground")
 	local fire = camp and camp:FindFirstChild("MainFire", true)
-	if fire then
-		cachedFirePart = partOf(fire)
-		if cachedFirePart then return cachedFirePart end
-	end
-	for _, sr in ipairs({ camp, map, Workspace:FindFirstChild("Items"), Workspace }) do
+	if fire then cachedFirePart = partOf(fire); if cachedFirePart then return cachedFirePart end end
+	for _, sr in ipairs({camp, map, Workspace:FindFirstChild("Items"), Workspace}) do
 		if sr then
 			local list = (sr == Workspace) and sr:GetChildren() or sr:GetDescendants()
 			for _, o in ipairs(list) do
 				if o.Name == "MainFire" or o.Name == "Campfire" then
-					local p = partOf(o)
-					if p then cachedFirePart = p; return p end
+					local p = partOf(o); if p then cachedFirePart = p; return p end
 				end
 			end
 		end
@@ -341,14 +309,13 @@ local function getScrapperPart()
 	cachedScrapperPart = nil
 	local map = Workspace:FindFirstChild("Map")
 	local camp = map and map:FindFirstChild("Campground")
-	for _, sr in ipairs({ camp, map, Workspace:FindFirstChild("Items"), Workspace }) do
+	for _, sr in ipairs({camp, map, Workspace:FindFirstChild("Items"), Workspace}) do
 		if sr then
 			local list = (sr == Workspace) and sr:GetChildren() or sr:GetDescendants()
 			for _, o in ipairs(list) do
 				local okName, n = pcall(function() return o.Name end)
 				if okName and type(n) == "string" and hasKey(n, SCRAPPER_KEYS) then
-					local p = partOf(o)
-					if p then cachedScrapperPart = p; return p end
+					local p = partOf(o); if p then cachedScrapperPart = p; return p end
 				end
 			end
 		end
@@ -381,19 +348,11 @@ local function initChildCache()
 	local charFolder = Workspace:FindFirstChild("Characters")
 	local scanTargets = { Workspace }
 	if charFolder then table.insert(scanTargets, charFolder) end
-
 	for _, folder in ipairs(scanTargets) do
-		for _, o in ipairs(folder:GetChildren()) do
-			if isChildModel(o) then childSet[o] = true end
-		end
-		folder.ChildAdded:Connect(function(o)
-			if isChildModel(o) then childSet[o] = true end
-		end)
-		folder.ChildRemoved:Connect(function(o)
-			childSet[o] = nil
-		end)
+		for _, o in ipairs(folder:GetChildren()) do if isChildModel(o) then childSet[o] = true end end
+		folder.ChildAdded:Connect(function(o) if isChildModel(o) then childSet[o] = true end end)
+		folder.ChildRemoved:Connect(function(o) childSet[o] = nil end)
 	end
-
 	task.spawn(function()
 		local ok, all = pcall(function() return Workspace:GetDescendants() end)
 		if not ok or not all then return end
@@ -432,8 +391,7 @@ local function isChildAlreadyRescued(child)
 	if rescuedChildren[child] then return true end
 	local key = getChildUniqueKey(child)
 	if key and rescuedChildKeys[key] then return true end
-	local fp = getFirePart()
-	local cp = partOf(child)
+	local fp = getFirePart(); local cp = partOf(child)
 	if fp and cp and (cp.Position - fp.Position).Magnitude <= 22 then
 		rescuedChildren[child] = true
 		if key then rescuedChildKeys[key] = true end
@@ -452,33 +410,23 @@ end
 local function findItemInBag(childName)
 	local itemBag = Player:FindFirstChild("ItemBag")
 	if not itemBag then return nil end
-	return itemBag:FindFirstChild(childName)
-		or itemBag:FindFirstChild(CHILD_KEY)
-		or itemBag:FindFirstChildWhichIsA("Model")
+	return itemBag:FindFirstChild(childName) or itemBag:FindFirstChild(CHILD_KEY) or itemBag:FindFirstChildWhichIsA("Model")
 end
 
 local function rescueSingleChild(child)
 	if not child or not child.Parent then return false end
-	if not (BagStoreRF and BagDropRE) then
-		updateRescueStatus("❌ Thiếu remote BagStore / BagDrop"); return false
-	end
+	if not (BagStoreRF and BagDropRE) then updateRescueStatus("❌ Thiếu remote BagStore / BagDrop"); return false end
 	local sack = getSackTool()
-	if not sack then
-		updateRescueStatus("❌ Không tìm thấy túi"); return false
-	end
+	if not sack then updateRescueStatus("❌ Không tìm thấy túi"); return false end
 	local fp = getFirePart()
-	if not fp then
-		updateRescueStatus("❌ Không tìm thấy Lửa trại"); return false
-	end
+	if not fp then updateRescueStatus("❌ Không tìm thấy Lửa trại"); return false end
 	local r, cp = root(), partOf(child)
 	if not (r and cp) then return false end
-
 	local childName = child.Name
 	updateRescueStatus("🏃 Đang TP tới: " .. childName)
 	r.CFrame = CFrame.new(cp.Position + Vector3.new(0, 3, 2))
 	task.wait(0.25)
 	if not CFG.AutoRescueChild then return false end
-
 	updateRescueStatus("🎒 Đang cất vào balo: " .. childName)
 	local bagTarget = findItemInBag(childName) or child
 	local storeOk = pcall(BagStoreRF.InvokeServer, BagStoreRF, sack, bagTarget)
@@ -488,19 +436,14 @@ local function rescueSingleChild(child)
 	end
 	task.wait(0.25)
 	if not CFG.AutoRescueChild then return false end
-
 	updateRescueStatus("🔥 Đang TP về lửa trại...")
 	r = root()
-	if r and fp and fp.Parent then
-		r.CFrame = CFrame.new(fp.Position + Vector3.new(0, 4, 3))
-	end
+	if r and fp and fp.Parent then r.CFrame = CFrame.new(fp.Position + Vector3.new(0, 4, 3)) end
 	task.wait(0.25)
-
 	updateRescueStatus("📤 Đang thả trẻ tại lửa trại...")
 	local dropTarget = (child and child.Parent) and child or findItemInBag(childName)
 	if dropTarget then pcall(BagDropRE.FireServer, BagDropRE, sack, dropTarget, true) end
 	task.wait(0.2)
-
 	markChildRescued(child)
 	totalChildrenSaved += 1
 	updateRescueStatus(string.format("✅ Đã cứu %s (Tổng: %d)", childName, totalChildrenSaved))
@@ -508,10 +451,8 @@ local function rescueSingleChild(child)
 end
 
 local function processNextChildRescue()
-	local r = root()
-	local rPos = r and r.Position
+	local r = root(); local rPos = r and r.Position
 	local nearestChild, bestDist = nil, math.huge
-
 	for child, _ in pairs(childSet) do
 		if child and child.Parent and not isChildAlreadyRescued(child) then
 			local p = partOf(child)
@@ -521,22 +462,14 @@ local function processNextChildRescue()
 			end
 		end
 	end
-
-	if not nearestChild then
-		updateRescueStatus(string.format("✅ Đã cứu hết trẻ · Tổng: %d", totalChildrenSaved))
-		return
-	end
+	if not nearestChild then updateRescueStatus(string.format("✅ Đã cứu hết trẻ · Tổng: %d", totalChildrenSaved)); return end
 	rescueSingleChild(nearestChild)
 end
 
 task.spawn(function()
 	while true do
-		if CFG.AutoRescueChild then
-			pcall(processNextChildRescue)
-			task.wait(1.0)
-		else
-			task.wait(0.5)
-		end
+		if CFG.AutoRescueChild then pcall(processNextChildRescue); task.wait(1.0)
+		else task.wait(0.5) end
 	end
 end)
 
@@ -574,7 +507,6 @@ local function initItemsAndChestCache()
 	if itemsCacheInitialized then return end
 	itemsCacheInitialized = true
 	local targetRoot = Workspace:FindFirstChild("Items") or Workspace
-
 	task.spawn(function()
 		local ok, all = pcall(function() return targetRoot:GetDescendants() end)
 		if not ok or not all then return end
@@ -585,15 +517,12 @@ local function initItemsAndChestCache()
 			if i % 600 == 0 then task.wait() end
 		end
 	end)
-
 	targetRoot.DescendantAdded:Connect(function(o)
 		if isChestObject(o) then cachedChests[o] = true
 		elseif isAmmoObject(o) then cachedAmmo[o] = true end
 	end)
-
 	targetRoot.DescendantRemoving:Connect(function(o)
-		cachedChests[o] = nil
-		cachedAmmo[o] = nil
+		cachedChests[o] = nil; cachedAmmo[o] = nil
 	end)
 end
 
@@ -625,7 +554,6 @@ local function scanLootInsideChest(targetChest)
 	local excludeList = { targetChest }
 	if Player.Character then table.insert(excludeList, Player.Character) end
 	overlapParams.FilterDescendantsInstances = excludeList
-
 	local insideParts = Workspace:GetPartBoundsInBox(boxCF, boxSize, overlapParams)
 	local out, seen = {}, {}
 	for _, part in ipairs(insideParts) do
@@ -645,11 +573,9 @@ local function tpItemToCampfire(item, idx)
 	if not item or not item.Parent or fireSentItems[item] then return false end
 	local fp = getFirePart()
 	if not fp or not fp.Parent then return false end
-	local spread = Vector3.new(math.random(-25, 25)/10, 10 + ((idx or 1)%6)*0.6, math.random(-25, 25)/10)
+	local spread = Vector3.new(math.random(-25,25)/10, 10 + ((idx or 1)%6)*0.6, math.random(-25,25)/10)
 	if moveItemToCFrame(item, CFrame.new(fp.Position + spread)) then
-		fireSentItems[item] = true
-		totalSentToFire += 1
-		return true
+		fireSentItems[item] = true; totalSentToFire += 1; return true
 	end
 	return false
 end
@@ -661,10 +587,8 @@ local function collectCachedAmmoBatch()
 		if not CFG.AutoChestAndLoot or claimed >= 8 then break end
 		if ammoObj and ammoObj.Parent and not claimedAmmo[ammoObj] then
 			if pcall(ConsumeRF.InvokeServer, ConsumeRF, ammoObj) then
-				claimedAmmo[ammoObj] = true
-				cachedAmmo[ammoObj] = nil
-				claimed += 1
-				totalAmmoCollected += 1
+				claimedAmmo[ammoObj] = true; cachedAmmo[ammoObj] = nil
+				claimed += 1; totalAmmoCollected += 1
 			end
 		else
 			cachedAmmo[ammoObj] = nil
@@ -674,15 +598,10 @@ local function collectCachedAmmoBatch()
 end
 
 local function processNextChestStepSmooth()
-	if not OpenChestRE then
-		updateChestLootStatus("❌ Thiếu remote RequestOpenItemChest"); return
-	end
+	if not OpenChestRE then updateChestLootStatus("❌ Thiếu remote RequestOpenItemChest"); return end
 	initItemsAndChestCache()
-
 	local targetChest, bestDist = nil, math.huge
-	local r = root()
-	local rPos = r and r.Position
-
+	local r = root(); local rPos = r and r.Position
 	for chest, _ in pairs(cachedChests) do
 		if chest and chest.Parent then
 			local p = partOf(chest)
@@ -695,19 +614,15 @@ local function processNextChestStepSmooth()
 			cachedChests[chest] = nil
 		end
 	end
-
 	if not targetChest then
 		local ammoGot = collectCachedAmmoBatch()
 		updateChestLootStatus(string.format("⚡ Nhặt:%d | →Lửa:%d | Đạn:%d (+%d)", totalItemsLooted, totalSentToFire, totalAmmoCollected, ammoGot))
 		return
 	end
-
 	if not openedChests[targetChest] then
 		pcall(OpenChestRE.FireServer, OpenChestRE, targetChest)
-		openedChests[targetChest] = true
-		totalChestsOpened += 1
+		openedChests[targetChest] = true; totalChestsOpened += 1
 	end
-
 	local items = scanLootInsideChest(targetChest)
 	local grabbed, toFire = 0, 0
 	for idx, item in ipairs(items) do
@@ -717,26 +632,18 @@ local function processNextChestStepSmooth()
 			if HotbarItemRF and (item:IsA("Tool") or item:IsA("Model")) and not isStackableBlueprint(item.Name) then
 				took = pcall(HotbarItemRF.InvokeServer, HotbarItemRF, item) == true
 			end
-			if took then
-				grabbed += 1; totalItemsLooted += 1
-			elseif tpItemToCampfire(item, idx) then
-				toFire += 1
-			end
+			if took then grabbed += 1; totalItemsLooted += 1
+			elseif tpItemToCampfire(item, idx) then toFire += 1 end
 		end
 	end
-
 	collectCachedAmmoBatch()
 	updateChestLootStatus(string.format("⚡ Rương:%d | Nhặt:%d (+%d) | →Lửa:%d (+%d)", totalChestsOpened, totalItemsLooted, grabbed, totalSentToFire, toFire))
 end
 
 task.spawn(function()
 	while true do
-		if CFG.AutoChestAndLoot then
-			pcall(processNextChestStepSmooth)
-			task.wait(0.35)
-		else
-			task.wait(0.4)
-		end
+		if CFG.AutoChestAndLoot then pcall(processNextChestStepSmooth); task.wait(0.35)
+		else task.wait(0.4) end
 	end
 end)
 
@@ -764,32 +671,23 @@ local function initCoinCache()
 			if i % 800 == 0 then task.wait() end
 		end
 	end)
-	targetRoot.DescendantAdded:Connect(function(o)
-		if o and hasKey(o.Name, COIN_KEYS) then cachedCoins[o] = true end
-	end)
-	targetRoot.DescendantRemoving:Connect(function(o)
-		cachedCoins[o] = nil
-	end)
+	targetRoot.DescendantAdded:Connect(function(o) if o and hasKey(o.Name, COIN_KEYS) then cachedCoins[o] = true end end)
+	targetRoot.DescendantRemoving:Connect(function(o) cachedCoins[o] = nil end)
 end
 
 local function collectAllCoinsOnce()
-	if not CollectCoinRF then
-		updateCoinStatus("❌ Thiếu remote RequestCollectCoints"); return 0
-	end
+	if not CollectCoinRF then updateCoinStatus("❌ Thiếu remote RequestCollectCoints"); return 0 end
 	initCoinCache()
 	local toCollect = {}
 	for coin, _ in pairs(cachedCoins) do
 		if coin and coin.Parent then table.insert(toCollect, coin) else cachedCoins[coin] = nil end
 	end
-	if #toCollect == 0 then
-		updateCoinStatus("⚠️ Chưa thấy xu (Tổng: " .. totalCollectedCoins .. ")"); return 0
-	end
+	if #toCollect == 0 then updateCoinStatus("⚠️ Chưa thấy xu (Tổng: " .. totalCollectedCoins .. ")"); return 0 end
 	local collected = 0
 	for _, coin in ipairs(toCollect) do
 		if not CFG.AutoCollectCoins then break end
 		if pcall(CollectCoinRF.InvokeServer, CollectCoinRF, coin) then
-			cachedCoins[coin] = nil
-			collected += 1; totalCollectedCoins += 1
+			cachedCoins[coin] = nil; collected += 1; totalCollectedCoins += 1
 		end
 		task.wait(0.05)
 	end
@@ -818,8 +716,7 @@ Workspace.ChildRemoved:Connect(function(c)
 end)
 
 local function nextId()
-	hitCounter += 1
-	return hitCounter .. "_" .. TOOL_SUFFIX
+	hitCounter += 1; return hitCounter .. "_" .. TOOL_SUFFIX
 end
 
 local function hitOnce(tool, target, p)
@@ -842,7 +739,6 @@ local function getAnimals(r)
 	local out, ch, seen = {}, Player.Character, {}
 	local maxDSq = CFG.KillRadius * CFG.KillRadius
 	local rPos = r.Position
-
 	local function tryAdd(o)
 		if seen[o] or o == ch or childSet[o] then return end
 		seen[o] = true
@@ -854,7 +750,6 @@ local function getAnimals(r)
 		local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
 		if dSq <= maxDSq then table.insert(out, {m=o, p=p, dSq=dSq}) end
 	end
-
 	for _, o in ipairs(Workspace:GetChildren()) do if o:IsA("Model") then tryAdd(o) end end
 	for _, fn in ipairs(SCAN_FOLDERS) do
 		local f = Workspace:FindFirstChild(fn)
@@ -876,9 +771,7 @@ task.spawn(function()
 					for i = 1, limit do
 						if not CFG.KillAura then break end
 						local t = targets[i]
-						if t.m and t.m.Parent and t.p and t.p.Parent then
-							hitOnce(tool, t.m, t.p)
-						end
+						if t.m and t.m.Parent and t.p and t.p.Parent then hitOnce(tool, t.m, t.p) end
 						if i < limit then task.wait(0.05) end
 					end
 					unequipToolSafe(tool)
@@ -899,19 +792,17 @@ local function getTrees(r, maxRadius)
 	local useLimit = type(maxRadius) == "number" and maxRadius > 0
 	local maxDSq = useLimit and (maxRadius * maxRadius) or math.huge
 	local rPos, now = r.Position, os.clock()
-
 	local function tryAddTree(t)
 		if skipTree[t] and now < skipTree[t] then return end
 		if not (t and t.Parent and t:IsA("Model")) then return end
-		if not hasKey(t.Name, TREE_KEYS) or hasKey(t.Name, { "Sapling", "Log", "Plank", "Scrap", "Chair" }) then return end
+		if not hasKey(t.Name, TREE_KEYS) or hasKey(t.Name, {"Sapling","Log","Plank","Scrap","Chair"}) then return end
 		local p = partOf(t); if not p then return end
 		local d = p.Position - rPos
 		local dSq = d.X*d.X + d.Y*d.Y + d.Z*d.Z
-		if dSq <= maxDSq then table.insert(out, { m = t, p = p, dSq = dSq }) end
+		if dSq <= maxDSq then table.insert(out, {m=t, p=p, dSq=dSq}) end
 	end
-
 	local map = Workspace:FindFirstChild("Map")
-	for _, folder in ipairs({ map and map:FindFirstChild("Foliage"), map and map:FindFirstChild("Trees"), Workspace:FindFirstChild("Foliage"), Workspace:FindFirstChild("Trees") }) do
+	for _, folder in ipairs({map and map:FindFirstChild("Foliage"), map and map:FindFirstChild("Trees"), Workspace:FindFirstChild("Foliage"), Workspace:FindFirstChild("Trees")}) do
 		if folder then for _, t in ipairs(folder:GetChildren()) do tryAddTree(t) end end
 	end
 	if #out == 0 then
@@ -952,7 +843,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- MOVEMENT, GOD MODE (CAP 20), BOUNDARIES ORBIT & AUTO MAP
+-- MOVEMENT, NOCLIP & FLY
 --========================================================
 
 local noclipBackup = {}
@@ -1016,19 +907,23 @@ local function startFly()
 		if UIS:IsKeyDown(Enum.KeyCode.Space) or padUp then vy = 1 end
 		if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or padDown then vy = -1 end
 		flyBV.Velocity = moveDir * CFG.FlySpeed + Vector3.new(0, vy * CFG.FlySpeed, 0)
-		flyBG.CFrame   = CFrame.new(rr.Position, rr.Position + flatLook)
+		flyBG.CFrame = CFrame.new(rr.Position, rr.Position + flatLook)
 	end)
 end
 
--- GOD MODE: DI CHUYỂN BÌNH THƯỜNG, GIỚI HẠN ĐỘ CAO = 20
+--========================================================
+-- GOD MODE FIX: PlatformStand + BodyVelocity đúng
+--========================================================
+
 local GOD_MAX_HEIGHT = 20
 local godHeight = GOD_MAX_HEIGHT
-local godConn, godBV
+local godConn, godBV, godBG
 
 local function cleanupGodInstances()
 	if godConn then godConn:Disconnect(); godConn = nil end
 	if godBV and godBV.Parent then godBV:Destroy() end
-	godBV = nil
+	if godBG and godBG.Parent then godBG:Destroy() end
+	godBV, godBG = nil, nil
 end
 
 local function stopGodMode()
@@ -1042,16 +937,29 @@ local function startGodMode()
 	cleanupGodInstances()
 	godHeight = math.clamp(godHeight, 5, GOD_MAX_HEIGHT)
 	CFG.GodMode = true
-
 	local r, h = root(), hum()
 	if not (r and h) then return end
-	h.PlatformStand = false
-	h.AutoRotate = true
+	h.PlatformStand = true
+	h.AutoRotate    = true
 
 	godBV = Instance.new("BodyVelocity")
-	godBV.MaxForce = Vector3.new(0, 0, 0)
+	godBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
 	godBV.Velocity = Vector3.zero
-	godBV.Parent = r
+	godBV.Parent   = r
+
+	godBG = Instance.new("BodyGyro")
+	godBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+	godBG.P         = 1e4
+	godBG.D         = 100
+	godBG.CFrame    = CFrame.new(r.Position)
+	godBG.Parent    = r
+
+	local rayP = RaycastParams.new()
+	rayP.FilterType = Enum.RaycastFilterType.Exclude
+	if Player.Character then rayP.FilterDescendantsInstances = {Player.Character} end
+	local ray0 = Workspace:Raycast(r.Position, Vector3.new(0,-500,0), rayP)
+	local gy0  = ray0 and ray0.Position.Y or 0
+	r.CFrame   = CFrame.new(r.Position.X, gy0 + godHeight, r.Position.Z)
 
 	local rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -1061,28 +969,33 @@ local function startGodMode()
 		if not (rr and hh and godBV and godBV.Parent) then stopGodMode(); return end
 		if not CFG.GodMode then stopGodMode(); return end
 
-		if Player.Character then rayParams.FilterDescendantsInstances = { Player.Character } end
-		local ray = Workspace:Raycast(rr.Position, Vector3.new(0, -500, 0), rayParams)
-		local groundY = ray and ray.Position.Y or 0
-		local capY = groundY + math.min(godHeight, GOD_MAX_HEIGHT)
+		if Player.Character then rayParams.FilterDescendantsInstances = {Player.Character} end
+		local ray = Workspace:Raycast(rr.Position, Vector3.new(0,-500,0), rayParams)
+		local groundY  = ray and ray.Position.Y or 0
+		local targetY  = groundY + godHeight
+		local currentY = rr.Position.Y
+		local diffY    = targetY - currentY
 
-		if rr.Position.Y > capY + 0.5 then
-			godBV.MaxForce = Vector3.new(0, 1e6, 0)
-			godBV.Velocity = Vector3.new(0, -25, 0)
-		elseif rr.Position.Y > capY then
-			rr.CFrame = CFrame.new(rr.Position.X, capY, rr.Position.Z) * (rr.CFrame - rr.CFrame.Position)
-			godBV.MaxForce = Vector3.new(0, 0, 0)
-			godBV.Velocity = Vector3.zero
-		else
-			godBV.MaxForce = Vector3.new(0, 0, 0)
-			godBV.Velocity = Vector3.zero
-		end
+		local cam = Workspace.CurrentCamera
+		local md  = hh.MoveDirection
+		local fl  = Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z)
+		local fr  = Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z)
+		if fl.Magnitude > 0 then fl = fl.Unit end
+		if fr.Magnitude > 0 then fr = fr.Unit end
+		local horizontal = (fl * (-md.Z) + fr * md.X) * CFG.WalkSpeed
 
-		if hh.Health < hh.MaxHealth then hh.Health = hh.MaxHealth end
+		local vy = math.clamp(diffY * 12, -40, 60)
+		godBV.Velocity = Vector3.new(horizontal.X, vy, horizontal.Z)
+		godBG.CFrame = CFrame.new(rr.Position)
+
+		if hh.Health < hh.MaxHealth then pcall(function() hh.Health = hh.MaxHealth end) end
 	end)
 end
 
--- QUÉT BOUNDARIES & BAY VÒNG TRÒN NHANH Ở ĐỘ CAO CAO TRONG BOUNDARIES
+--========================================================
+-- BOUNDARIES ORBIT
+--========================================================
+
 local circleAltitude = 55
 local circleSpeed    = 65
 local circleStatusText = "Chờ bật bay vòng tròn trong Boundaries..."
@@ -1105,46 +1018,29 @@ local function scanBoundariesScope()
 			if okN and type(n) == "string" and string.find(string.lower(n), "boundar", 1, true) then
 				if obj:IsA("BasePart") then table.insert(targets, obj)
 				elseif obj:IsA("Model") then
-					local p = partOf(obj)
-					if p then table.insert(targets, p) end
+					local p = partOf(obj); if p then table.insert(targets, p) end
 				end
 			end
 		end
 	end
-
 	collect(Workspace:FindFirstChild("Map"))
 	if #targets == 0 then collect(Workspace) end
-
 	if #targets == 0 then
-		local fp = getFirePart()
-		local r = root()
+		local fp = getFirePart(); local r = root()
 		local c = fp and fp.Position or (r and r.Position or Vector3.zero)
-		return { centerX = c.X, centerZ = c.Z, groundY = c.Y, radius = 110, minX = c.X - 110, maxX = c.X + 110, minZ = c.Z - 110, maxZ = c.Z + 110, count = 0 }
+		return { centerX = c.X, centerZ = c.Z, groundY = c.Y, radius = 110, minX = c.X-110, maxX = c.X+110, minZ = c.Z-110, maxZ = c.Z+110, count = 0 }
 	end
-
-	local minX, maxX = math.huge, -math.huge
-	local minZ, maxZ = math.huge, -math.huge
+	local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
 	local sumY, countY = 0, 0
 	for _, part in ipairs(targets) do
 		local pos = part.Position
-		minX = math.min(minX, pos.X - part.Size.X * 0.5)
-		maxX = math.max(maxX, pos.X + part.Size.X * 0.5)
-		minZ = math.min(minZ, pos.Z - part.Size.Z * 0.5)
-		maxZ = math.max(maxZ, pos.Z + part.Size.Z * 0.5)
+		minX = math.min(minX, pos.X - part.Size.X*0.5); maxX = math.max(maxX, pos.X + part.Size.X*0.5)
+		minZ = math.min(minZ, pos.Z - part.Size.Z*0.5); maxZ = math.max(maxZ, pos.Z + part.Size.Z*0.5)
 		sumY += pos.Y; countY += 1
 	end
-
-	local cx = (minX + maxX) * 0.5
-	local cz = (minZ + maxZ) * 0.5
-	local halfSpan = math.min(math.max((maxX - minX) * 0.5, 25), math.max((maxZ - minZ) * 0.5, 25))
-	return {
-		centerX = cx, centerZ = cz,
-		groundY = countY > 0 and (sumY / countY) or 0,
-		radius  = math.max(halfSpan - 6, 15),
-		minX = minX + 4, maxX = maxX - 4,
-		minZ = minZ + 4, maxZ = maxZ - 4,
-		count = #targets,
-	}
+	local cx = (minX + maxX)*0.5; local cz = (minZ + maxZ)*0.5
+	local halfSpan = math.min(math.max((maxX-minX)*0.5, 25), math.max((maxZ-minZ)*0.5, 25))
+	return { centerX=cx, centerZ=cz, groundY = countY>0 and (sumY/countY) or 0, radius=math.max(halfSpan-6,15), minX=minX+4, maxX=maxX-4, minZ=minZ+4, maxZ=maxZ-4, count=#targets }
 end
 
 local function clampInsideBounds(x, z, b)
@@ -1152,9 +1048,7 @@ local function clampInsideBounds(x, z, b)
 	local dist = math.sqrt(dx*dx + dz*dz)
 	local maxR = math.max(b.radius, 10)
 	if dist > maxR and dist > 0 then
-		local s = maxR / dist
-		x = b.centerX + dx * s
-		z = b.centerZ + dz * s
+		local s = maxR/dist; x = b.centerX + dx*s; z = b.centerZ + dz*s
 	end
 	return math.clamp(x, b.minX, b.maxX), math.clamp(z, b.minZ, b.maxZ)
 end
@@ -1178,44 +1072,31 @@ local function startCircleBoundaries()
 	CFG.CircleBoundaries = true
 	local r, h = root(), hum()
 	if not (r and h) then updateCircleStatus("❌ Không tìm thấy nhân vật"); return end
-
 	local b = scanBoundariesScope()
 	h.PlatformStand = true; h.AutoRotate = false
-
 	circleBV = Instance.new("BodyVelocity"); circleBV.MaxForce = Vector3.new(1e6,1e6,1e6); circleBV.Velocity = Vector3.zero; circleBV.Parent = r
 	circleBG = Instance.new("BodyGyro"); circleBG.MaxTorque = Vector3.new(1e6,1e6,1e6); circleBG.P = 1e4; circleBG.Parent = r
-
 	local angle = math.atan2(r.Position.Z - b.centerZ, r.Position.X - b.centerX)
-	local orbitRadius = math.min(math.max(b.radius * 0.78, 12), b.radius)
-	local rayParams = RaycastParams.new()
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	local orbitRadius = math.min(math.max(b.radius*0.78, 12), b.radius)
+	local rayParams = RaycastParams.new(); rayParams.FilterType = Enum.RaycastFilterType.Exclude
 	local lastScan, lastStatus = os.clock(), 0
-
 	updateCircleStatus(string.format("🌀 Quét %d Boundaries · R:%.0f · Cao:%d", b.count, orbitRadius, circleAltitude))
-
 	circleConn = RunService.Heartbeat:Connect(function(dt)
 		local rr, hh = root(), hum()
 		if not (rr and hh and circleBV and circleBV.Parent and circleBG and circleBG.Parent) then stopCircleBoundaries(); return end
 		if not CFG.CircleBoundaries then stopCircleBoundaries(); return end
-
 		if os.clock() - lastScan > 4 then
-			lastScan = os.clock()
-			b = scanBoundariesScope()
-			orbitRadius = math.min(math.max(b.radius * 0.78, 12), b.radius)
+			lastScan = os.clock(); b = scanBoundariesScope(); orbitRadius = math.min(math.max(b.radius*0.78, 12), b.radius)
 		end
-
 		angle += (circleSpeed / math.max(orbitRadius, 8)) * dt
-		local goalX, goalZ = clampInsideBounds(b.centerX + math.cos(angle) * orbitRadius, b.centerZ + math.sin(angle) * orbitRadius, b)
-
-		if Player.Character then rayParams.FilterDescendantsInstances = { Player.Character } end
-		local ray = Workspace:Raycast(Vector3.new(goalX, rr.Position.Y + 20, goalZ), Vector3.new(0, -500, 0), rayParams)
+		local goalX, goalZ = clampInsideBounds(b.centerX + math.cos(angle)*orbitRadius, b.centerZ + math.sin(angle)*orbitRadius, b)
+		if Player.Character then rayParams.FilterDescendantsInstances = {Player.Character} end
+		local ray = Workspace:Raycast(Vector3.new(goalX, rr.Position.Y+20, goalZ), Vector3.new(0,-500,0), rayParams)
 		local goalY = (ray and ray.Position.Y or b.groundY) + circleAltitude
-
 		local vel = (Vector3.new(goalX, goalY, goalZ) - rr.Position) * 12
-		if vel.Magnitude > circleSpeed * 1.4 then vel = vel.Unit * (circleSpeed * 1.4) end
+		if vel.Magnitude > circleSpeed*1.4 then vel = vel.Unit*(circleSpeed*1.4) end
 		circleBV.Velocity = vel
 		circleBG.CFrame = CFrame.lookAt(rr.Position, Vector3.new(goalX - math.sin(angle)*10, goalY, goalZ + math.cos(angle)*10))
-
 		if hh.Health < hh.MaxHealth then hh.Health = hh.MaxHealth end
 		if os.clock() - lastStatus > 0.8 then
 			lastStatus = os.clock()
@@ -1224,7 +1105,10 @@ local function startCircleBoundaries()
 	end)
 end
 
--- AUTO MỞ MAP ĐỊNH KỲ
+--========================================================
+-- AUTO MAP FIX: độc lập hoàn toàn, chỉ reveal cells
+--========================================================
+
 local autoMapStatusText = "Chờ bật Auto Mở Map..."
 local autoMapStatusLbl  = nil
 local totalMapReveals   = 0
@@ -1240,25 +1124,23 @@ local function revealMapOnce()
 	for row = 1, 64 do
 		for col = 1, 64 do table.insert(cells, {Row=row, Col=col}) end
 	end
+	local sent = 0
 	for i = 1, #cells, 200 do
 		local batch = {}
-		for j = i, math.min(i + 199, #cells) do table.insert(batch, cells[j]) end
-		pcall(MapRE.FireServer, MapRE, batch, {})
+		for j = i, math.min(i+199, #cells) do table.insert(batch, cells[j]) end
+		local ok = pcall(MapRE.FireServer, MapRE, batch, {})
+		if ok then sent += #batch end
 		task.wait(0.08)
 	end
 	totalMapReveals += 1
-	updateAutoMapStatus(string.format("🗺️ Đã mở Map (Lần: %d)", totalMapReveals))
+	updateAutoMapStatus(string.format("🗺️ Lần %d · Đã gửi %d/%d ô", totalMapReveals, sent, 64*64))
 	return true
 end
 
 task.spawn(function()
 	while true do
-		if CFG.AutoMap then
-			pcall(revealMapOnce)
-			task.wait(6)
-		else
-			task.wait(0.5)
-		end
+		if CFG.AutoMap then pcall(revealMapOnce); task.wait(6)
+		else task.wait(0.5) end
 	end
 end)
 
@@ -1281,14 +1163,14 @@ local function applyFB()
 end
 local function setFullbright(on)
 	if on then
-		if not fbPrev then fbPrev = { B=Lighting.Brightness, C=Lighting.ClockTime, F=Lighting.FogEnd, A=Lighting.Ambient, OA=Lighting.OutdoorAmbient } end
+		if not fbPrev then fbPrev = {B=Lighting.Brightness,C=Lighting.ClockTime,F=Lighting.FogEnd,A=Lighting.Ambient,OA=Lighting.OutdoorAmbient} end
 		applyFB()
 		if not fbConn then fbConn = RunService.Heartbeat:Connect(function() if CFG.Fullbright then applyFB() end end) end
 	else
 		if fbConn then fbConn:Disconnect(); fbConn = nil end
 		if fbPrev then
-			Lighting.Brightness = fbPrev.B; Lighting.ClockTime = fbPrev.C; Lighting.FogEnd = fbPrev.F
-			Lighting.Ambient = fbPrev.A; Lighting.OutdoorAmbient = fbPrev.OA; fbPrev = nil
+			Lighting.Brightness=fbPrev.B; Lighting.ClockTime=fbPrev.C; Lighting.FogEnd=fbPrev.F
+			Lighting.Ambient=fbPrev.A; Lighting.OutdoorAmbient=fbPrev.OA; fbPrev=nil
 		end
 	end
 end
@@ -1298,10 +1180,7 @@ local lagConn, lagGen = nil, 0
 local function saveProp(obj, prop)
 	local t = LagBackup[obj]
 	if not t then t = {}; LagBackup[obj] = t end
-	if t[prop] == nil then
-		local ok, val = pcall(function() return obj[prop] end)
-		if ok then t[prop] = val end
-	end
+	if t[prop] == nil then local ok, val = pcall(function() return obj[prop] end); if ok then t[prop] = val end end
 end
 local function optimizeObj(obj)
 	if not CFG.FixLag or not obj or not obj.Parent then return end
@@ -1316,7 +1195,7 @@ end
 local function setFixLag(v)
 	if v then
 		if CFG.FixLag then return end; CFG.FixLag = true; lagGen += 1; local gen = lagGen
-		pcall(function() Lighting.GlobalShadows = false; Lighting.EnvironmentDiffuseScale = 0; Lighting.EnvironmentSpecularScale = 0 end)
+		pcall(function() Lighting.GlobalShadows=false; Lighting.EnvironmentDiffuseScale=0; Lighting.EnvironmentSpecularScale=0 end)
 		if not lagConn then lagConn = Workspace.DescendantAdded:Connect(function(obj) if CFG.FixLag then task.defer(optimizeObj, obj) end end) end
 		task.spawn(function()
 			local ok, all = pcall(function() return Workspace:GetDescendants() end)
@@ -1338,7 +1217,7 @@ local function setFixLag(v)
 end
 
 --========================================================
--- AUTO EAT, ESP CHILD, FUEL & SCRAPPER (CHECK BEFORE DRAG)
+-- AUTO EAT, ESP CHILD, FUEL & SCRAPPER
 --========================================================
 
 local eatStatusText = "Chờ bật ăn carrot..."
@@ -1387,21 +1266,21 @@ task.spawn(function()
 			for m, _ in pairs(childSet) do
 				if m.Parent and not espTag[m] then
 					local saved = isChildAlreadyRescued(m)
-					local espColor = saved and Color3.fromRGB(100, 255, 130) or Color3.fromRGB(255, 220, 80)
-					local hl = Instance.new("Highlight"); hl.FillColor = espColor; hl.OutlineColor = espColor; hl.FillTransparency = 0.45; hl.Adornee = m; hl.Parent = m
+					local espColor = saved and Color3.fromRGB(100,255,130) or Color3.fromRGB(255,220,80)
+					local hl = Instance.new("Highlight"); hl.FillColor=espColor; hl.OutlineColor=espColor; hl.FillTransparency=0.45; hl.Adornee=m; hl.Parent=m
 					local adornPart = partOf(m)
 					local bb, lblConn
 					if adornPart then
-						bb = Instance.new("BillboardGui"); bb.Adornee = adornPart; bb.Size = UDim2.new(0,170,0,46); bb.StudsOffset = Vector3.new(0,3,0); bb.AlwaysOnTop = true; bb.Parent = adornPart
-						local lbl = Instance.new("TextLabel"); lbl.Size = UDim2.new(1,0,1,0); lbl.BackgroundTransparency = 1; lbl.TextColor3 = espColor; lbl.TextStrokeTransparency = 0.3; lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 13; lbl.Parent = bb
+						bb = Instance.new("BillboardGui"); bb.Adornee=adornPart; bb.Size=UDim2.new(0,170,0,46); bb.StudsOffset=Vector3.new(0,3,0); bb.AlwaysOnTop=true; bb.Parent=adornPart
+						local lbl = Instance.new("TextLabel"); lbl.Size=UDim2.new(1,0,1,0); lbl.BackgroundTransparency=1; lbl.TextColor3=espColor; lbl.TextStrokeTransparency=0.3; lbl.Font=Enum.Font.GothamBold; lbl.TextSize=13; lbl.Parent=bb
 						lblConn = RunService.Heartbeat:Connect(function()
 							if not m.Parent or not CFG.ESPChild then lblConn:Disconnect(); return end
 							local rr, pp = root(), partOf(m)
 							local statusTag = isChildAlreadyRescued(m) and " [Đã cứu]" or ""
-							lbl.Text = (rr and pp) and (m.Name .. statusTag .. "\n📍 " .. math.floor((pp.Position - rr.Position).Magnitude) .. " studs") or (m.Name .. statusTag)
+							lbl.Text = (rr and pp) and (m.Name..statusTag.."\n📍 "..math.floor((pp.Position-rr.Position).Magnitude).." studs") or (m.Name..statusTag)
 						end)
 					end
-					espTag[m] = { hl=hl, bb=bb, conn=lblConn }
+					espTag[m] = {hl=hl, bb=bb, conn=lblConn}
 				end
 			end
 		elseif next(espTag) then
@@ -1416,8 +1295,7 @@ local function tpScrapper() local sp, r = getScrapperPart(), root(); if sp and r
 
 local function pullPlayerToMe(plr)
 	if not plr or plr == Player then return false end
-	local r = root()
-	local tr = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+	local r = root(); local tr = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
 	if r and tr then tr.CFrame = r.CFrame * CFrame.new(0,1,-4); return true end
 	return false
 end
@@ -1431,7 +1309,7 @@ local function pullAllExact(nameList)
 	for _, o in ipairs(searchList) do
 		if (ch and o:IsDescendantOf(ch)) or Players:GetPlayerFromCharacter(o) or isWorldArchitecture(o) then continue end
 		if (o:IsA("Model") or o:IsA("BasePart")) and matchesExact(o.Name, nameList) then
-			local goalCF = r.CFrame * CFrame.new(((count%3)-1)*1.4, 1.2 + math.floor(count/3)*0.6, -3)
+			local goalCF = r.CFrame * CFrame.new(((count%3)-1)*1.4, 1.2+math.floor(count/3)*0.6, -3)
 			if moveItemToCFrame(o, goalCF) then count += 1 end
 		end
 	end
@@ -1459,10 +1337,10 @@ local function dumpFuelToFire()
 					if matchesExact(o.Name, FUEL_EXACT) then
 						local p = partOf(o)
 						if p and (p.Position - fp.Position).Magnitude > 14 then
-							local dropPos = fp.Position + Vector3.new(math.random(-20,20)/10, 9 + (count%5)*0.6, math.random(-20,20)/10)
+							local dropPos = fp.Position + Vector3.new(math.random(-20,20)/10, 9+(count%5)*0.6, math.random(-20,20)/10)
 							if moveItemToCFrame(o, CFrame.new(dropPos)) then
 								count += 1; totalFuelMoved += 1
-								updateFireStatus(string.format("🔥 Đang TP từng món: %s (Tổng: %d)", tostring(o.Name), totalFuelMoved))
+								updateFireStatus(string.format("🔥 Đang TP: %s (Tổng: %d)", tostring(o.Name), totalFuelMoved))
 								task.wait(0.05)
 							end
 						end
@@ -1480,11 +1358,11 @@ end
 
 task.spawn(function()
 	while true do
-		if CFG.AutoDrop then pcall(dumpFuelToFire); task.wait(0.1) else task.wait(0.3) end
+		if CFG.AutoDrop then pcall(dumpFuelToFire); task.wait(0.1)
+		else task.wait(0.3) end
 	end
 end)
 
--- FIX SCRAPPER: CHECK TRƯỚC, DRAG SAU
 local scrapStatusText, scrapStatusLbl, isMovingScrap, totalScrapMoved = "Chờ bật auto TP Scrapper...", nil, false, 0
 local function updateScrapStatus(txt) scrapStatusText = txt; if scrapStatusLbl and scrapStatusLbl.Parent then scrapStatusLbl.Text = txt end end
 
@@ -1493,23 +1371,18 @@ local function isValidScrapItem(obj)
 	local okAlive = pcall(function() return obj.Parent end)
 	if not okAlive or not obj.Parent then return false end
 	if not (obj:IsA("Model") or obj:IsA("BasePart")) then return false end
-
 	local okN, name = pcall(function() return obj.Name end)
 	if not okN or type(name) ~= "string" or not SCRAP_EXACT_SET[name] then return false end
-
 	local mapFolder = Workspace:FindFirstChild("Map")
 	if mapFolder and obj:IsDescendantOf(mapFolder) then return false end
-
 	local ch = Player.Character
 	if ch and obj:IsDescendantOf(ch) then return false end
 	if Players:GetPlayerFromCharacter(obj) then return false end
-
 	if obj:IsA("BasePart") then
 		if obj.Anchored then return false end
 		local sz = obj.Size
 		if sz.X > 5 or sz.Y > 5 or sz.Z > 5 then return false end
 	end
-
 	if obj:IsA("Model") then
 		local ok, _, sz = pcall(function() return obj:GetBoundingBox() end)
 		if ok and sz and (sz.X > 7 or sz.Y > 7 or sz.Z > 7) then return false end
@@ -1536,7 +1409,7 @@ local function sendScrapToScrapper()
 		if not sp or not sp.Parent then updateScrapStatus("❌ Không tìm thấy Scrapper"); return 0 end
 		local itemsFolder = Workspace:FindFirstChild("Items")
 		local scanList = itemsFolder and itemsFolder:GetChildren() or Workspace:GetChildren()
-		local SKIP = { Map=true, Characters=true, Terrain=true, Enemies=true, Mobs=true, NPCs=true, Campground=true }
+		local SKIP = {Map=true,Characters=true,Terrain=true,Enemies=true,Mobs=true,NPCs=true,Campground=true}
 		local count = 0
 		for _, o in ipairs(scanList) do
 			if not CFG.AutoScrapper then break end
@@ -1563,7 +1436,8 @@ end
 
 task.spawn(function()
 	while true do
-		if CFG.AutoScrapper then pcall(sendScrapToScrapper); task.wait(0.1) else task.wait(0.3) end
+		if CFG.AutoScrapper then pcall(sendScrapToScrapper); task.wait(0.1)
+		else task.wait(0.3) end
 	end
 end)
 
@@ -1577,9 +1451,7 @@ local function plantAllSaplings(statusLbl)
 	local basePos = r.CFrame.Position - Vector3.new(0, 3, 0)
 	local count = 0
 	for _, sapling in ipairs(saplings) do
-		if pcall(PlantRE.InvokeServer, PlantRE, sapling, basePos + Vector3.new(math.random(-3,3)/10, 0, math.random(-3,3)/10)) then
-			count += 1
-		end
+		if pcall(PlantRE.InvokeServer, PlantRE, sapling, basePos + Vector3.new(math.random(-3,3)/10, 0, math.random(-3,3)/10)) then count += 1 end
 		if StopDragRE then pcall(StopDragRE.FireServer, StopDragRE, sapling) end
 		task.wait(0.15)
 	end
@@ -1666,7 +1538,6 @@ function Library:CreateWindow(title)
 	sidebarFrame.BackgroundTransparency = 0.2
 	sidebarFrame.Parent = mainFrame
 	Instance.new("UICorner", sidebarFrame).CornerRadius = UDim.new(0, 8)
-
 	local strokeSidebar = Instance.new("UIStroke"); strokeSidebar.Color = currentColor; strokeSidebar.Parent = sidebarFrame
 
 	local titleLabel = Instance.new("TextLabel")
@@ -1684,8 +1555,6 @@ function Library:CreateWindow(title)
 	contentFrame.BackgroundTransparency = 1
 	contentFrame.Parent = mainFrame
 
-	local currentTab = nil
-	local currentBtn = nil
 	local tabY = 35
 	local tabEntries = {}
 
@@ -1698,13 +1567,11 @@ function Library:CreateWindow(title)
 		entry.btn.BackgroundColor3 = currentColor
 		entry.btn.TextColor3 = Color3.fromRGB(0, 0, 0)
 		entry.tab.Visible = true
-		currentTab = entry.tab
-		currentBtn = entry.btn
 	end
 
 	local function Notify(titulo, texto, duracao)
 		pcall(function()
-			game:GetService("StarterGui"):SetCore("SendNotification", { Title = titulo, Text = texto, Duration = duracao or 5 })
+			game:GetService("StarterGui"):SetCore("SendNotification", {Title=titulo, Text=texto, Duration=duracao or 5})
 		end)
 	end
 
@@ -1744,10 +1611,11 @@ function Library:CreateWindow(title)
 		pad.PaddingTop = UDim.new(0, 8)
 		pad.PaddingBottom = UDim.new(0, 10)
 
-		local entry = { btn = btn, tab = Tab }
+		local entry = {btn = btn, tab = Tab}
 		table.insert(tabEntries, entry)
 		btn.MouseButton1Click:Connect(function() selectTab(entry) end)
 
+		-- Tab đầu tiên tự động được chọn ngay khi CreateTab được gọi lần đầu
 		if #tabEntries == 1 then
 			selectTab(entry)
 		end
@@ -1763,7 +1631,6 @@ function Library:CreateWindow(title)
 			sectionFrame.Parent = Tab
 			sectionFrame.AutomaticSize = Enum.AutomaticSize.Y
 			Instance.new("UICorner", sectionFrame).CornerRadius = UDim.new(0, 6)
-
 			local stroke = Instance.new("UIStroke", sectionFrame); stroke.Color = currentColor; stroke.Thickness = 1
 			local sectionLayout = Instance.new("UIListLayout", sectionFrame); sectionLayout.Padding = UDim.new(0, 4)
 
@@ -1782,17 +1649,13 @@ function Library:CreateWindow(title)
 			container.BackgroundTransparency = 1
 			container.Parent = sectionFrame
 			container.AutomaticSize = Enum.AutomaticSize.Y
-
 			local clayout = Instance.new("UIListLayout", container); clayout.Padding = UDim.new(0, 6); clayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 			local cpad = Instance.new("UIPadding", container); cpad.PaddingBottom = UDim.new(0, 6)
 
 			function Section:AddLabel(text)
 				local l = Instance.new("TextLabel")
-				l.Size = UDim2.new(1, -12, 0, 20)
-				l.Text = text
-				l.BackgroundTransparency = 1
-				l.TextColor3 = Color3.fromRGB(220, 220, 220)
-				l.Font = Enum.Font.Gotham; l.TextSize = 11
+				l.Size = UDim2.new(1, -12, 0, 20); l.Text = text; l.BackgroundTransparency = 1
+				l.TextColor3 = Color3.fromRGB(220, 220, 220); l.Font = Enum.Font.Gotham; l.TextSize = 11
 				l.TextXAlignment = Enum.TextXAlignment.Left; l.TextTruncate = Enum.TextTruncate.AtEnd
 				l.Parent = container
 				return l
@@ -1800,12 +1663,9 @@ function Library:CreateWindow(title)
 
 			function Section:AddButton(text, callback)
 				local b = Instance.new("TextButton")
-				b.Size = UDim2.new(1, -12, 0, 32)
-				b.Text = text
-				b.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-				b.TextColor3 = currentColor
-				b.Font = Enum.Font.GothamBold; b.TextSize = 11
-				b.Parent = container
+				b.Size = UDim2.new(1, -12, 0, 32); b.Text = text
+				b.BackgroundColor3 = Color3.fromRGB(30, 30, 30); b.TextColor3 = currentColor
+				b.Font = Enum.Font.GothamBold; b.TextSize = 11; b.Parent = container
 				Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
 				b.MouseButton1Click:Connect(function() if callback then pcall(callback) end end)
 				return b
@@ -1817,15 +1677,15 @@ function Library:CreateWindow(title)
 				local state = default == true
 
 				local f = Instance.new("Frame")
-				f.Size = UDim2.new(1, -12, 0, 36)
-				f.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+				f.Size = UDim2.new(1, -12, 0, 36); f.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 				f.Parent = container
 				Instance.new("UICorner", f).CornerRadius = UDim.new(0, 4)
 
 				local label = Instance.new("TextLabel")
 				label.Size = UDim2.new(1, -55, 1, 0); label.Position = UDim2.new(0, 10, 0, 0)
 				label.Text = text; label.BackgroundTransparency = 1; label.TextColor3 = currentColor
-				label.Font = Enum.Font.Gotham; label.TextSize = 11; label.TextXAlignment = Enum.TextXAlignment.Left; label.TextTruncate = Enum.TextTruncate.AtEnd
+				label.Font = Enum.Font.Gotham; label.TextSize = 11
+				label.TextXAlignment = Enum.TextXAlignment.Left; label.TextTruncate = Enum.TextTruncate.AtEnd
 				label.Parent = f
 
 				local toggle = Instance.new("Frame")
@@ -1844,10 +1704,10 @@ function Library:CreateWindow(title)
 				f.InputBegan:Connect(function(input)
 					if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
 						state = not state
-						TweenService:Create(toggle, TweenInfo.new(0.2), { BackgroundColor3 = state and currentColor or Color3.fromRGB(50, 50, 50) }):Play()
+						TweenService:Create(toggle, TweenInfo.new(0.2), {BackgroundColor3 = state and currentColor or Color3.fromRGB(50,50,50)}):Play()
 						TweenService:Create(circle, TweenInfo.new(0.2), {
-							Position = state and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8),
-							BackgroundColor3 = state and Color3.fromRGB(0, 0, 0) or currentColor
+							Position = state and UDim2.new(1,-18,0.5,-8) or UDim2.new(0,2,0.5,-8),
+							BackgroundColor3 = state and Color3.fromRGB(0,0,0) or currentColor
 						}):Play()
 						if callback then pcall(callback, state) end
 					end
@@ -1863,17 +1723,17 @@ function Library:CreateWindow(title)
 				local initAlpha = math.clamp((value - min) / math.max(max - min, 1), 0, 1)
 
 				local frame = Instance.new("Frame")
-				frame.Size = UDim2.new(1, -12, 0, 55); frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30); frame.Parent = container
+				frame.Size = UDim2.new(1, -12, 0, 55); frame.BackgroundColor3 = Color3.fromRGB(30,30,30); frame.Parent = container
 				Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 4)
 
 				local label = Instance.new("TextLabel")
-				label.Size = UDim2.new(1, -10, 0, 20); label.Position = UDim2.new(0, 5, 0, 5)
-				label.Text = text .. " (" .. value .. ")"; label.BackgroundTransparency = 1; label.TextColor3 = currentColor
+				label.Size = UDim2.new(1,-10,0,20); label.Position = UDim2.new(0,5,0,5)
+				label.Text = text.." ("..value..")"; label.BackgroundTransparency = 1; label.TextColor3 = currentColor
 				label.Font = Enum.Font.Gotham; label.TextSize = 11; label.Parent = frame
 
 				local bar = Instance.new("Frame")
-				bar.Size = UDim2.new(1, -20, 0, 5); bar.Position = UDim2.new(0, 10, 1, -15)
-				bar.BackgroundColor3 = Color3.fromRGB(50, 50, 50); bar.Parent = frame
+				bar.Size = UDim2.new(1,-20,0,5); bar.Position = UDim2.new(0,10,1,-15)
+				bar.BackgroundColor3 = Color3.fromRGB(50,50,50); bar.Parent = frame
 				Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
 
 				local fill = Instance.new("Frame")
@@ -1885,7 +1745,7 @@ function Library:CreateWindow(title)
 					local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
 					fill.Size = UDim2.new(pos, 0, 1, 0)
 					value = math.floor(min + (max - min) * pos + 0.5)
-					label.Text = text .. " (" .. value .. ")"
+					label.Text = text.." ("..value..")"
 					if callback then pcall(callback, value) end
 				end
 
@@ -1909,7 +1769,7 @@ function Library:CreateWindow(title)
 	function windowFunctions:SetToggleSize(size)
 		toggleButtonSize = size
 		toggleButton.Size = UDim2.new(0, size, 0, size)
-		toggleButton.Position = UDim2.new(0, 10, 0.5, -(size / 2))
+		toggleButton.Position = UDim2.new(0, 10, 0.5, -(size/2))
 	end
 
 	local open = true
@@ -1941,7 +1801,7 @@ flyPad.Parent = GuiParent
 local function holdBtn(yOff, text, onState)
 	local b = Instance.new("TextButton")
 	b.Size = UDim2.fromOffset(56, 56); b.Position = UDim2.fromOffset(0, yOff)
-	b.BackgroundColor3 = Color3.fromRGB(25, 25, 25); b.Text = text; b.TextColor3 = Color3.fromRGB(255, 128, 0)
+	b.BackgroundColor3 = Color3.fromRGB(25,25,25); b.Text = text; b.TextColor3 = Color3.fromRGB(255,128,0)
 	b.Font = Enum.Font.GothamBold; b.TextSize = 20; b.Parent = flyPad
 	Instance.new("UICorner", b).CornerRadius = UDim.new(1, 0)
 	Instance.new("UIStroke", b).Color = Color3.fromRGB(255, 128, 0)
@@ -1974,7 +1834,6 @@ local okUI, errUI = pcall(function()
 			if not v then updateChestLootStatus(string.format("Tắt · Nhặt:%d | →Lửa:%d | Đạn:%d", totalItemsLooted, totalSentToFire, totalAmmoCollected)) end
 		end)
 		chestLootStatusLbl = sChest:AddLabel(chestLootStatusText)
-
 		sChest:AddToggle("Tự động nhặt toàn bộ xu", CFG.AutoCollectCoins, function(v)
 			CFG.AutoCollectCoins = v
 			if v then task.spawn(collectAllCoinsOnce) else updateCoinStatus("Tắt (Tổng: " .. totalCollectedCoins .. ")") end
@@ -2019,22 +1878,20 @@ local okUI, errUI = pcall(function()
 		end)
 		rescueStatusLbl = sAutoRescue:AddLabel(rescueStatusText)
 		sAutoRescue:AddButton("🔄 Reset danh sách trẻ đã cứu", function()
-			rescuedChildren = setmetatable({}, { __mode = "k" }); rescuedChildKeys = {}
+			rescuedChildren = setmetatable({}, {__mode="k"}); rescuedChildKeys = {}
 			updateRescueStatus("🔄 Đã reset danh sách trẻ đã cứu")
 		end)
-
 		local sChild = TabChild:AddSection("ESP & TP THỦ CÔNG")
 		sChild:AddToggle("ESP Trẻ em", CFG.ESPChild, function(v) CFG.ESPChild = v; if not v then clearESPChild() end end)
 		local r, list = root(), {}
 		for m, _ in pairs(childSet) do
 			if m and m.Parent then
 				local p = partOf(m)
-				if p then table.insert(list, { m=m, d = r and math.floor((p.Position - r.Position).Magnitude) or 0 }) end
+				if p then table.insert(list, {m=m, d = r and math.floor((p.Position - r.Position).Magnitude) or 0}) end
 			end
 		end
 		table.sort(list, function(a, b) return a.d < b.d end)
-		if #list == 0 then
-			sChild:AddLabel("Không tìm thấy trẻ nào")
+		if #list == 0 then sChild:AddLabel("Không tìm thấy trẻ nào")
 		else
 			for i, item in ipairs(list) do
 				sChild:AddButton(string.format("TP %d. %s (%d studs)", i, item.m.Name, item.d), function() tpTo(item.m) end)
@@ -2053,7 +1910,7 @@ local okUI, errUI = pcall(function()
 		fireStatusLbl = sFire:AddLabel(fireStatusText)
 		sFire:AddButton("🪵 Dồn nhiên liệu → Lửa ngay", function() task.spawn(dumpFuelToFire) end)
 
-		local sScrap = TabItems:AddSection("SCRAPPER (CHECK TRƯỚC · DRAG SAU)")
+		local sScrap = TabItems:AddSection("SCRAPPER")
 		sScrap:AddButton("⚙️ TP Scrapper", tpScrapper)
 		sScrap:AddToggle("Auto TP phế liệu → Scrapper", CFG.AutoScrapper, function(v)
 			CFG.AutoScrapper = v
