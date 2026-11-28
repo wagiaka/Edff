@@ -1,7 +1,8 @@
 --========================================================
--- SUNSET UI + OLLIE 99 NIGHTS (CHECK-FIRST SCRAPPER & GOD MODE)
--- Scrapper: Check Before Drag + SCRAP_EXACT_SET + Map Blocked
--- God Mode: High Hover via Raycast + Horizontal Move + Auto HP Reset
+-- SUNSET UI + OLLIE 99 NIGHTS (GOD 20 + AUTO MAP + BOUNDARIES ORBIT)
+-- God Mode: Normal Move + Auto HP Reset + Height Cap 20
+-- Auto Map: Periodic Reveal Map Loop
+-- Boundaries Orbit: Scan Boundaries + High Altitude + Fast Circle Inside Bounds
 --========================================================
 
 local Players      = game:GetService("Players")
@@ -144,6 +145,8 @@ local CFG = {
 	Fly = false,              FlySpeed = 60,
 	Noclip = false,
 	GodMode = false,
+	AutoMap = false,
+	CircleBoundaries = false,
 	KillAura = false,         KillRadius = 150,
 	AutoChop = false,         ChopRadius = 130,
 	AutoDrop = false,
@@ -1266,7 +1269,7 @@ task.spawn(function()
 end)
 
 --========================================================
--- MOVEMENT, NOCLIP, FLY & GOD MODE
+-- MOVEMENT, NOCLIP, FLY, GOD MODE (CAP 20) & BOUNDARIES ORBIT
 --========================================================
 
 local noclipBackup = {}
@@ -1341,13 +1344,12 @@ local function startFly()
 end
 
 -- =====================================================
--- GOD MODE: BAY CAO TRÁNH SÁT THƯƠNG
--- Auto đưa lên cao 80 studs, duy trì vị trí,
--- tự động reset nếu bị knock về đất
+-- GOD MODE: DI CHUYỂN BÌNH THƯỜNG (KHÔNG BẮT) & GIỚI HẠN ĐỘ CAO = 20
 -- =====================================================
 
-local godHeight = 80 -- studs trên mặt đất
-local godConn   = nil
+local GOD_MAX_HEIGHT = 20
+local godHeight      = GOD_MAX_HEIGHT -- giới hạn tối đa 20 studs
+local godConn        = nil
 local godBV, godBG
 
 local function cleanupGodInstances()
@@ -1369,32 +1371,36 @@ end
 
 local function startGodMode()
 	cleanupGodInstances()
+	godHeight = math.clamp(godHeight, 5, GOD_MAX_HEIGHT)
 	CFG.GodMode = true
 
 	local r, h = root(), hum()
 	if not (r and h) then return end
 
-	h.PlatformStand = true
-	h.AutoRotate    = false
+	-- Không khóa di chuyển (không bật PlatformStand / không bắt buộc đứng yên)
+	h.PlatformStand = false
+	h.AutoRotate    = true
 
-	-- BodyVelocity giữ yên
+	-- Chỉ giới hạn độ cao tối đa khi vượt quá groundY + godHeight (tối đa 20)
 	godBV = Instance.new("BodyVelocity")
-	godBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+	godBV.MaxForce = Vector3.new(0, 1e6, 0) -- chỉ can thiệp trục Y nếu vượt độ cao giới hạn
 	godBV.Velocity = Vector3.zero
 	godBV.Parent   = r
 
-	-- BodyGyro giữ thẳng đứng
-	godBG = Instance.new("BodyGyro")
-	godBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
-	godBG.P         = 1e4
-	godBG.CFrame    = CFrame.new(r.Position)
-	godBG.Parent    = r
-
-	-- Đưa lên cao ngay
-	r.CFrame = CFrame.new(r.Position + Vector3.new(0, godHeight, 0))
-
 	local godRayParams = RaycastParams.new()
 	godRayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	local groundY = 0
+	if Player.Character then
+		godRayParams.FilterDescendantsInstances = { Player.Character }
+	end
+	local initRay = Workspace:Raycast(r.Position, Vector3.new(0, -500, 0), godRayParams)
+	if initRay then groundY = initRay.Position.Y end
+
+	local maxAllowedY = groundY + math.min(godHeight, GOD_MAX_HEIGHT)
+	if r.Position.Y > maxAllowedY then
+		r.CFrame = CFrame.new(r.Position.X, maxAllowedY, r.Position.Z) * (r.CFrame - r.CFrame.Position)
+	end
 
 	godConn = RunService.Heartbeat:Connect(function()
 		local rr, hh = root(), hum()
@@ -1403,59 +1409,323 @@ local function startGodMode()
 		end
 		if not CFG.GodMode then stopGodMode(); return end
 
-		local groundY  = 0
-		local currentY = rr.Position.Y
-
 		if Player.Character then
 			godRayParams.FilterDescendantsInstances = { Player.Character }
 		end
-
-		-- Tính mặt đất thực bằng Raycast xuống
-		local ray = workspace:Raycast(
-			rr.Position,
-			Vector3.new(0, -500, 0),
-			godRayParams
-		)
+		local ray = Workspace:Raycast(rr.Position, Vector3.new(0, -500, 0), godRayParams)
 		if ray then groundY = ray.Position.Y end
 
-		local targetY = groundY + godHeight
-
-		if currentY < targetY - 5 then
-			-- Đang bị kéo xuống, đẩy lên mạnh
-			godBV.Velocity = Vector3.new(0, 60, 0)
-		elseif currentY > targetY + 5 then
-			-- Quá cao, kéo nhẹ xuống
-			godBV.Velocity = Vector3.new(0, -20, 0)
+		local capY = groundY + math.min(godHeight, GOD_MAX_HEIGHT)
+		if rr.Position.Y > capY + 0.5 then
+			godBV.MaxForce = Vector3.new(0, 1e6, 0)
+			godBV.Velocity = Vector3.new(0, -25, 0)
+		elseif rr.Position.Y > capY then
+			rr.CFrame = CFrame.new(rr.Position.X, capY, rr.Position.Z) * (rr.CFrame - rr.CFrame.Position)
+			godBV.MaxForce = Vector3.new(0, 0, 0)
+			godBV.Velocity = Vector3.zero
 		else
-			-- Duy trì vị trí, cho phép di chuyển ngang theo input
-			local md = hh.MoveDirection
-			local cam = Workspace.CurrentCamera
-			local flatLook  = cam and Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z) or Vector3.new(0, 0, -1)
-			local flatRight = cam and Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z) or Vector3.new(1, 0, 0)
-			if flatLook.Magnitude  > 0 then flatLook  = flatLook.Unit  end
-			if flatRight.Magnitude > 0 then flatRight = flatRight.Unit end
-			local horizontal = (flatLook*(-md.Z) + flatRight*md.X) * CFG.WalkSpeed
-			godBV.Velocity = Vector3.new(horizontal.X, 0, horizontal.Z)
+			-- Cho phép di chuyển & nhảy tự do dưới giới hạn độ cao 20
+			godBV.MaxForce = Vector3.new(0, 0, 0)
+			godBV.Velocity = Vector3.zero
 		end
 
-		-- Giữ nhân vật thẳng đứng (không bị ragdoll lật)
-		godBG.CFrame = CFrame.new(rr.Position)
-
-		-- Liên tục reset health max để không chết
+		-- Tự động giữ máu tối đa
 		if hh.Health < hh.MaxHealth then
 			hh.Health = hh.MaxHealth
 		end
 	end)
 end
 
--- CharacterAdded: tự restart GodMode nếu đang bật
+-- =====================================================
+-- QUÉT BOUNDARIES & BAY VÒNG TRÒN NHANH Ở ĐỘ CAO CAO TRONG BOUNDARIES
+-- =====================================================
+
+local circleAltitude = 55 -- độ cao bay (cao)
+local circleSpeed    = 65 -- tốc độ bay vòng tròn nhanh (studs/s)
+local circleStatusText = "Chờ bật bay vòng tròn trong Boundaries..."
+local circleStatusLbl  = nil
+
+local circleConn
+local circleBV, circleBG
+local cachedBounds = nil
+
+local function updateCircleStatus(txt)
+	circleStatusText = txt
+	if circleStatusLbl and circleStatusLbl.Parent then
+		circleStatusLbl.Text = txt
+	end
+end
+
+local function scanBoundariesScope()
+	local mapFolder = Workspace:FindFirstChild("Map")
+	local searchTargets = {}
+
+	local function collectFrom(container)
+		if not container then return end
+		for _, obj in ipairs(container:GetDescendants()) do
+			local okN, n = pcall(function() return obj.Name end)
+			if okN and type(n) == "string" and string.find(string.lower(n), "boundar", 1, true) then
+				if obj:IsA("BasePart") then
+					table.insert(searchTargets, obj)
+				elseif obj:IsA("Model") then
+					local p = partOf(obj)
+					if p then table.insert(searchTargets, p) end
+				end
+			end
+		end
+	end
+
+	collectFrom(mapFolder)
+	if #searchTargets == 0 then
+		for _, child in ipairs(Workspace:GetChildren()) do
+			local okN, n = pcall(function() return child.Name end)
+			if okN and type(n) == "string" and string.find(string.lower(n), "boundar", 1, true) then
+				if child:IsA("BasePart") then
+					table.insert(searchTargets, child)
+				elseif child:IsA("Model") or child:IsA("Folder") then
+					collectFrom(child)
+				end
+			end
+		end
+	end
+
+	if #searchTargets == 0 then
+		-- Fallback: dùng tâm lửa trại hoặc vị trí hiện tại
+		local fp = getFirePart()
+		local r = root()
+		local center = fp and fp.Position or (r and r.Position or Vector3.zero)
+		return {
+			centerX = center.X,
+			centerZ = center.Z,
+			groundY = center.Y,
+			radius  = 110,
+			minX    = center.X - 110,
+			maxX    = center.X + 110,
+			minZ    = center.Z - 110,
+			maxZ    = center.Z + 110,
+			count   = 0,
+		}
+	end
+
+	local minX, maxX = math.huge, -math.huge
+	local minZ, maxZ = math.huge, -math.huge
+	local sumY, countY = 0, 0
+
+	for _, part in ipairs(searchTargets) do
+		local pos = part.Position
+		local halfX = part.Size.X * 0.5
+		local halfZ = part.Size.Z * 0.5
+		minX = math.min(minX, pos.X - halfX)
+		maxX = math.max(maxX, pos.X + halfX)
+		minZ = math.min(minZ, pos.Z - halfZ)
+		maxZ = math.max(maxZ, pos.Z + halfZ)
+		sumY += pos.Y
+		countY += 1
+	end
+
+	local cx = (minX + maxX) * 0.5
+	local cz = (minZ + maxZ) * 0.5
+	local halfSpanX = math.max((maxX - minX) * 0.5, 25)
+	local halfSpanZ = math.max((maxZ - minZ) * 0.5, 25)
+	local safeRadius = math.max(math.min(halfSpanX, halfSpanZ) - 6, 15)
+	local baseGroundY = countY > 0 and (sumY / countY) or 0
+
+	return {
+		centerX = cx,
+		centerZ = cz,
+		groundY = baseGroundY,
+		radius  = safeRadius,
+		minX    = minX + 4,
+		maxX    = maxX - 4,
+		minZ    = minZ + 4,
+		maxZ    = maxZ - 4,
+		count   = #searchTargets,
+	}
+end
+
+local function clampPointInsideBounds(x, z, b)
+	local dx = x - b.centerX
+	local dz = z - b.centerZ
+	local dist = math.sqrt(dx * dx + dz * dz)
+	local maxR = math.max(b.radius, 10)
+
+	if dist > maxR and dist > 0 then
+		local scale = maxR / dist
+		x = b.centerX + dx * scale
+		z = b.centerZ + dz * scale
+	end
+
+	x = math.clamp(x, b.minX, b.maxX)
+	z = math.clamp(z, b.minZ, b.maxZ)
+	return x, z
+end
+
+local function cleanupCircleInstances()
+	if circleConn then circleConn:Disconnect(); circleConn = nil end
+	if circleBV and circleBV.Parent then circleBV:Destroy() end
+	if circleBG and circleBG.Parent then circleBG:Destroy() end
+	circleBV, circleBG = nil, nil
+end
+
+local function stopCircleBoundaries()
+	CFG.CircleBoundaries = false
+	cleanupCircleInstances()
+	local h = hum()
+	if h then
+		h.PlatformStand = false
+		h.AutoRotate    = true
+	end
+	updateCircleStatus("Tắt bay vòng tròn Boundaries")
+end
+
+local function startCircleBoundaries()
+	cleanupCircleInstances()
+	CFG.CircleBoundaries = true
+
+	local r, h = root(), hum()
+	if not (r and h) then
+		updateCircleStatus("❌ Không tìm thấy nhân vật")
+		return
+	end
+
+	cachedBounds = scanBoundariesScope()
+	local b = cachedBounds
+
+	h.PlatformStand = true
+	h.AutoRotate    = false
+
+	circleBV = Instance.new("BodyVelocity")
+	circleBV.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+	circleBV.Velocity = Vector3.zero
+	circleBV.Parent   = r
+
+	circleBG = Instance.new("BodyGyro")
+	circleBG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
+	circleBG.P         = 1e4
+	circleBG.Parent    = r
+
+	local startDX = r.Position.X - b.centerX
+	local startDZ = r.Position.Z - b.centerZ
+	local angle = math.atan2(startDZ, startDX)
+	local orbitRadius = math.min(math.max(b.radius * 0.78, 12), b.radius)
+
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	local lastScan = os.clock()
+	local lastStatus = 0
+
+	updateCircleStatus(string.format("🌀 Quét %d Boundaries · R:%.0f · Cao:%d", b.count, orbitRadius, circleAltitude))
+
+	circleConn = RunService.Heartbeat:Connect(function(dt)
+		local rr, hh = root(), hum()
+		if not (rr and hh and circleBV and circleBV.Parent and circleBG and circleBG.Parent) then
+			stopCircleBoundaries(); return
+		end
+		if not CFG.CircleBoundaries then
+			stopCircleBoundaries(); return
+		end
+
+		if os.clock() - lastScan > 4 then
+			lastScan = os.clock()
+			cachedBounds = scanBoundariesScope()
+			b = cachedBounds
+			orbitRadius = math.min(math.max(b.radius * 0.78, 12), b.radius)
+		end
+
+		local angularVel = circleSpeed / math.max(orbitRadius, 8)
+		angle += angularVel * dt
+
+		local rawX = b.centerX + math.cos(angle) * orbitRadius
+		local rawZ = b.centerZ + math.sin(angle) * orbitRadius
+		local goalX, goalZ = clampPointInsideBounds(rawX, rawZ, b)
+
+		if Player.Character then
+			rayParams.FilterDescendantsInstances = { Player.Character }
+		end
+		local ray = Workspace:Raycast(Vector3.new(goalX, rr.Position.Y + 20, goalZ), Vector3.new(0, -500, 0), rayParams)
+		local baseGround = ray and ray.Position.Y or b.groundY
+		local goalY = baseGround + circleAltitude
+
+		local goalPos = Vector3.new(goalX, goalY, goalZ)
+		local delta = goalPos - rr.Position
+		local desiredVel = delta * 12
+
+		if desiredVel.Magnitude > circleSpeed * 1.4 then
+			desiredVel = desiredVel.Unit * (circleSpeed * 1.4)
+		end
+
+		circleBV.Velocity = desiredVel
+		local lookTarget = Vector3.new(
+			goalX - math.sin(angle) * 10,
+			goalY,
+			goalZ + math.cos(angle) * 10
+		)
+		circleBG.CFrame = CFrame.lookAt(rr.Position, lookTarget)
+
+		if hh.Health < hh.MaxHealth then
+			hh.Health = hh.MaxHealth
+		end
+
+		if os.clock() - lastStatus > 0.8 then
+			lastStatus = os.clock()
+			updateCircleStatus(string.format("🌀 Bay cao %d · R:%.0f · Tốc:%d", circleAltitude, orbitRadius, circleSpeed))
+		end
+	end)
+end
+
+-- =====================================================
+-- AUTO MỞ MAP ĐỊNH KỲ
+-- =====================================================
+
+local autoMapStatusText = "Chờ bật Auto Mở Map..."
+local autoMapStatusLbl  = nil
+local totalMapReveals   = 0
+
+local function updateAutoMapStatus(txt)
+	autoMapStatusText = txt
+	if autoMapStatusLbl and autoMapStatusLbl.Parent then
+		autoMapStatusLbl.Text = txt
+	end
+end
+
+local function revealMapOnce()
+	if not MapRE then
+		updateAutoMapStatus("❌ Thiếu remote MapCellsDiscovered")
+		return false
+	end
+	local cells = {}
+	for row = 1, 64 do
+		for col = 1, 64 do table.insert(cells, {Row=row, Col=col}) end
+	end
+	for i = 1, #cells, 200 do
+		local b = {}
+		for j = i, math.min(i+199, #cells) do table.insert(b, cells[j]) end
+		pcall(MapRE.FireServer, MapRE, b, {})
+		task.wait(0.08)
+	end
+	totalMapReveals += 1
+	updateAutoMapStatus(string.format("🗺️ Đã mở Map (Lần: %d)", totalMapReveals))
+	return true
+end
+
+task.spawn(function()
+	while true do
+		if CFG.AutoMap then
+			pcall(revealMapOnce)
+			task.wait(6)
+		else
+			task.wait(0.5)
+		end
+	end
+end)
+
 Player.CharacterAdded:Connect(function()
 	task.wait(0.8)
 	resetCounter()
 	if CFG.Fly then startFly() end
-	if CFG.GodMode then
-		startGodMode()
-	end
+	if CFG.GodMode then startGodMode() end
+	if CFG.CircleBoundaries then startCircleBoundaries() end
 end)
 
 --========================================================
@@ -1849,49 +2119,39 @@ end
 local function isValidScrapItem(obj)
 	if not obj then return false end
 
-	-- Phải còn tồn tại
 	local okAlive = pcall(function() return obj.Parent end)
 	if not okAlive or not obj.Parent then return false end
 
-	-- Chỉ nhận Model hoặc BasePart
 	if not (obj:IsA("Model") or obj:IsA("BasePart")) then return false end
 
-	-- Tên phải khớp chính xác SCRAP_EXACT (case-sensitive, không lower)
 	local okN, name = pcall(function() return obj.Name end)
 	if not okN or type(name) ~= "string" then return false end
 	if not SCRAP_EXACT_SET[name] then return false end
 
-	-- Không được nằm trong Map (sàn, tường, nhà cây)
 	local mapFolder = Workspace:FindFirstChild("Map")
 	if mapFolder and obj:IsDescendantOf(mapFolder) then return false end
 
-	-- Không được là con của nhân vật hoặc người chơi khác
 	local ch = Player.Character
 	if ch and obj:IsDescendantOf(ch) then return false end
 	if Players:GetPlayerFromCharacter(obj) then return false end
 
-	-- BasePart: không anchored, không quá lớn
 	if obj:IsA("BasePart") then
 		if obj.Anchored then return false end
 		local sz = obj.Size
 		if sz.X > 5 or sz.Y > 5 or sz.Z > 5 then return false end
 	end
 
-	-- Model: không quá lớn (nhà/kiến trúc)
 	if obj:IsA("Model") then
 		local ok, _, sz = pcall(function() return obj:GetBoundingBox() end)
 		if ok and sz and (sz.X > 7 or sz.Y > 7 or sz.Z > 7) then return false end
-		-- Model phải có PrimaryPart hoặc BasePart để dịch chuyển được
 		if not partOf(obj) then return false end
 	end
 
 	return true
 end
 
--- moveScrapItem: CHỈ drag object đã được xác nhận hợp lệ
 local function moveScrapItem(obj, goalCF)
 	if not obj or not obj.Parent then return false end
-	-- Double-check trước khi thực sự drag
 	if not isValidScrapItem(obj) then return false end
 
 	local ok = pcall(function()
@@ -1917,10 +2177,8 @@ local function sendScrapToScrapper()
 			return 0
 		end
 
-		-- Chỉ quét Items folder, dùng GetChildren (không GetDescendants)
 		local itemsFolder = Workspace:FindFirstChild("Items")
 		if not itemsFolder then
-			-- Fallback: quét Workspace:GetChildren() nhưng bỏ qua Map/Characters/Terrain
 			local SKIP = { Map=true, Characters=true, Terrain=true,
 						   Enemies=true, Mobs=true, NPCs=true, Campground=true }
 			local count = 0
@@ -2028,16 +2286,7 @@ local function plantAllSaplings(statusLbl)
 end
 
 local function revealMap()
-	if not MapRE then return end
-	local cells = {}
-	for row = 1, 64 do
-		for col = 1, 64 do table.insert(cells, {Row=row, Col=col}) end
-	end
-	for i = 1, #cells, 200 do
-		local b = {}
-		for j = i, math.min(i+199, #cells) do table.insert(b, cells[j]) end
-		pcall(MapRE.FireServer, MapRE, b, {}); task.wait(0.1)
-	end
+	revealMapOnce()
 end
 
 --========================================================
@@ -2631,13 +2880,25 @@ do
 		if not v then restoreNoclip() end
 	end)
 
-	sMove:AddToggle("🛡 God Mode (Bay cao tránh sát thương)", CFG.GodMode, function(v)
+	sMove:AddToggle("🛡 God Mode (Di chuyển thường · Cao max 20)", CFG.GodMode, function(v)
 		if v then startGodMode() else stopGodMode() end
 	end)
-	sMove:AddSlider("God Height (studs)", 20, 300, 80, function(v)
-		godHeight = v
+	sMove:AddSlider("God Height Cap (max 20)", 5, 20, godHeight, function(v)
+		godHeight = math.clamp(v, 5, GOD_MAX_HEIGHT)
 		if CFG.GodMode then startGodMode() end
 	end)
+
+	local sBounds = TabMove:AddSection("BOUNDARIES ORBIT (BAY CAO · NHANH · TRONG BOUNDARIES)")
+	sBounds:AddToggle("🌀 Bay vòng tròn trong Boundaries", CFG.CircleBoundaries, function(v)
+		if v then startCircleBoundaries() else stopCircleBoundaries() end
+	end)
+	sBounds:AddSlider("Độ cao bay vòng tròn (studs)", 20, 180, circleAltitude, function(v)
+		circleAltitude = v
+	end)
+	sBounds:AddSlider("Tốc độ bay vòng tròn", 20, 160, circleSpeed, function(v)
+		circleSpeed = v
+	end)
+	circleStatusLbl = sBounds:AddLabel(circleStatusText)
 end
 
 -- TAB 3: TRẺ EM
@@ -2760,7 +3021,16 @@ do
 	end)
 
 	local sMap = TabSet:AddSection("BẢN ĐỒ & GIAO DIỆN")
-	sMap:AddButton("🗺️ Reveal Map", function()
+	sMap:AddToggle("🗺️ Auto Mở Map", CFG.AutoMap, function(v)
+		CFG.AutoMap = v
+		if v then
+			task.spawn(revealMapOnce)
+		else
+			updateAutoMapStatus(string.format("Tắt Auto Mở Map (Đã mở: %d)", totalMapReveals))
+		end
+	end)
+	autoMapStatusLbl = sMap:AddLabel(autoMapStatusText)
+	sMap:AddButton("🗺️ Reveal Map ngay", function()
 		task.spawn(revealMap)
 	end)
 	sMap:AddSlider("Kích thước nút bật/tắt", 32, 70, 40, function(v)
@@ -2769,5 +3039,5 @@ do
 end
 
 print("========================================")
-print(" SUNSET UI + 99 NIGHTS GOD & SCRAPPER ✓")
+print(" SUNSET UI + 99 NIGHTS GOD20 & ORBIT ✓")
 print("========================================")
